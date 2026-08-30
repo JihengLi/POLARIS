@@ -1,0 +1,42 @@
+{
+  "schema": "polaris-experiments-v1",
+  "development_only": {
+    "dataset": "PEX Hard Small",
+    "reported": false,
+    "use": "method and adaptive stopping parameters were frozen here"
+  },
+  "test_protocols": {
+    "pex": {
+      "dataset": "PEX Hard Medium",
+      "references": 953,
+      "query_files": 219,
+      "trials": 791,
+      "selection": "tempo in {'', '100'} and pitch in {'', '0'}",
+      "unit": "oracle-cropped annotation segment"
+    },
+    "sdrr": {
+      "dataset": "SD-RR v1.0",
+      "doi": "10.5281/zenodo.22169646",
+      "references": 496,
+      "queries": 1488,
+      "query_seconds": 10,
+      "unit": "smartphone re-recorded query"
+    }
+  },
+  "main_systems": [
+    "audfp_m",
+    "audfp_q",
+    "panako",
+    "olaf",
+    "nmfp",
+    "polaris_adaptive",
+    "polaris"
+  ],
+  "sdrr_ablations": [
+    "magnitude_maxima",
+    "two_hop_only",
+    "dense_only",
+    "canonical_only",
+    "target_region"
+  ]
+}

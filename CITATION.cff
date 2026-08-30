@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use POLARIS, cite the associated paper and the SD-RR dataset."
+title: "POLARIS: Training-Free Audio Fingerprinting with Delaunay Landmark Grouping and Query-Side Expansion"
+type: software
+authors:
+  - family-names: Li
+    given-names: Jiheng
+    affiliation: Vanderbilt University
+    orcid: "https://orcid.org/0009-0001-0638-1997"
+version: 1.0.0
+repository-code: "https://github.com/JihengLi/POLARIS"
+keywords:
+  - audio fingerprinting
+  - Delaunay triangulation
+  - spectral landmarks
+  - asymmetric retrieval

@@ -1,0 +1,76 @@
+"""
+Author: Jiheng Li
+Email: jiheng.li.1@vanderbilt.edu
+"""
+
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import numpy as np
+from scipy.io import wavfile
+
+from polaris import DEFAULT_CONFIG, Polaris, fingerprint, prepare_query
+from polaris.engine import build_reference_index
+from polaris.fingerprint import pack_descriptor, pack_hash
+from polaris.index import build_packed_index
+
+
+def _signal(seconds: float = 3.0) -> np.ndarray:
+    sample_rate = DEFAULT_CONFIG.audio.sample_rate
+    time = np.arange(round(sample_rate * seconds)) / sample_rate
+    wave = (
+        0.45 * np.sin(2 * np.pi * (550 + 120 * time) * time)
+        + 0.30 * np.sin(2 * np.pi * 1_100 * time)
+        + 0.20 * np.sin(2 * np.pi * (1_900 - 80 * time) * time)
+    )
+    return np.asarray(np.clip(wave, -1, 1) * 30_000, dtype=np.int16)
+
+
+def test_frozen_configuration_identity():
+    config = DEFAULT_CONFIG.to_dict()
+    assert config["name"] == "polaris"
+    assert config["audio"]["sample_rate"] == 40_000
+    assert config["reference_landmarks"]["landmarks_per_second"] == 22.0
+    assert config["dense_query_landmarks"]["landmarks_per_second"] == 64.0
+    assert config["same_density_query_pairing"]["neighborhood_hops"] == 2
+
+
+def test_packed_descriptor_round_trip_identity():
+    descriptor = (25, -3, 4, 7, 12)
+    assert pack_hash("tri:25:-3:4:7:12") == pack_descriptor(descriptor)
+
+
+def test_query_stages_are_nested_and_deterministic():
+    samples = _signal()
+    first = set(fingerprint(samples, 40_000, for_query=False))
+    second = set(fingerprint(samples, 40_000, for_query=False))
+    prepared = prepare_query(samples, 40_000)
+    canonical = prepared.hashes("canonical")
+    two_hop = prepared.hashes("two_hop")
+    full = prepared.hashes("full")
+    assert first == second
+    assert first
+    assert canonical <= two_hop <= full
+    digest = hashlib.sha256(repr(sorted(first)).encode()).hexdigest()
+    assert len(digest) == 64
+
+
+def test_end_to_end_file_and_packed_index_agree(tmp_path: Path):
+    sample_rate = DEFAULT_CONFIG.audio.sample_rate
+    reference = tmp_path / "reference-a.wav"
+    wavfile.write(reference, sample_rate, _signal())
+    index = tmp_path / "index"
+    assert build_reference_index([reference], index, workers=1) == 1
+
+    with Polaris(index, index_backend="file") as recognizer:
+        file_result = recognizer.recognize_file(reference, topn=1)
+    build_packed_index(index)
+    with Polaris(index, index_backend="packed") as recognizer:
+        packed_result = recognizer.recognize_file(reference, topn=1)
+
+    assert file_result["results"][0]["song_name"] == "reference-a"
+    assert packed_result["results"] == file_result["results"]

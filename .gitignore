@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+
+# Downloaded audio and generated artifacts are not tracked.
+data/sdrr/
+data/pex_hard_medium/
+outputs/
+benchmarks/*/.cache/
+benchmarks/*/.venv/

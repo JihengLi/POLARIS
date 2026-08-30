@@ -1,0 +1,15 @@
+[project]
+name = "polaris-audfprint-adapter"
+version = "1.0.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "docopt>=0.6.2,<0.7",
+  "joblib>=1.3,<2",
+  "numpy>=1.26,<3",
+  "psutil>=5.9,<8",
+  "pydub>=0.25.1,<0.26",
+  "scipy>=1.11,<2",
+]
+
+[tool.uv]
+package = false
