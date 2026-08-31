@@ -31,22 +31,13 @@ from polaris_eval.datasets import load_pex as load_pex_dataset
 from polaris_eval.io import EvaluationError
 from polaris_eval.io import write_csv as write_csv_rows
 from polaris_eval.io import write_json as write_summary
-from polaris_eval.metrics import summarize_single_reference_trials
+from polaris_eval.metrics import PEX_RESULT_FIELDS, summarize_pex
 from polaris_eval.protocol import (
     build_oracle_segments,
     group_oracle_segments,
 )
 
-TRIAL_FIELDS = (
-    "trial_id",
-    "query_id",
-    "reference_id",
-    "query_begin",
-    "query_end",
-    "query_seconds",
-    "predicted_reference_id",
-    "total_time",
-)
+TRIAL_FIELDS = PEX_RESULT_FIELDS
 
 CLOSED_SET_CONFIGURATION = (
     "PANAKO_MIN_HITS_UNFILTERED=1",
@@ -57,7 +48,7 @@ CLOSED_SET_CONFIGURATION = (
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate Panako on PEX Hard Medium.")
     parser.add_argument("dataset", type=Path)
     parser.add_argument("-o", "--output", required=True, type=Path)
     parser.add_argument("--index", required=True, type=Path)
@@ -83,7 +74,7 @@ def main() -> int:
         java = resolve_java(None)
         native_library_path = resolve_native_library_path(None)
         annotations, reference_paths, query_paths = load_pex_dataset(dataset)
-        source_annotations, segments = build_oracle_segments(annotations)
+        _, segments = build_oracle_segments(annotations)
         grouped = group_oracle_segments(segments)
         cli = PanakoCLI(
             jar=jar,
@@ -148,7 +139,7 @@ def main() -> int:
                 first_trial = batch[0][1].trial_id
                 raise SystemExit(f"Panako query batch failed from {first_trial}: {exc}") from exc
 
-            for query_id, segment, _, query_seconds in batch:
+            for query_id, segment, _, _ in batch:
                 ranked, _, elapsed, _ = batch_results[segment.trial_id]
                 predicted_id = ranked[0][0] if ranked else ""
                 rows.append(
@@ -157,10 +148,11 @@ def main() -> int:
                         "query_id": query_id,
                         "reference_id": segment.annotation.reference_id,
                         "query_begin": segment.begin,
-                        "query_end": segment.end,
-                        "query_seconds": query_seconds,
+                        "status": "matched" if ranked else "no_match",
                         "predicted_reference_id": predicted_id,
+                        "query_records": None,
                         "total_time": elapsed,
+                        "error": "",
                     }
                 )
                 completed += 1
@@ -176,6 +168,7 @@ def main() -> int:
         [str(java), "-version"], check=False, capture_output=True, text=True
     ).stderr.splitlines()[0]
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "pex_oracle_segment_exact_scale_v1",
         "system": system,
         "system_version": PANAKO_VERSION,
@@ -184,14 +177,7 @@ def main() -> int:
         "jar_sha256": file_sha256(jar),
         "java": {"path": str(java), "version": java_version},
         "dataset": str(dataset),
-        "dataset_counts": {
-            "all_annotations": len(annotations),
-            "source_scale_exact_annotations": len(source_annotations),
-            "trials": len(segments),
-            "references": len(reference_paths),
-            "query_files": len(grouped),
-        },
-        "paper_metrics": summarize_single_reference_trials(rows),
+        **summarize_pex(rows),
         "configuration": {
             "strategy": strategy,
             "algorithm_parameters": (

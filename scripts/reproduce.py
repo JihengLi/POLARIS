@@ -16,9 +16,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+POLARIS_SYSTEMS = (
+    "polaris_o",
+    "polaris_a",
+    "polaris_f",
+)
 MAIN_SYSTEMS = (
-    "polaris",
-    "polaris_adaptive",
+    *POLARIS_SYSTEMS,
     "audfp_m",
     "audfp_q",
     "panako",
@@ -27,9 +31,6 @@ MAIN_SYSTEMS = (
 )
 ABLATIONS = (
     "magnitude_maxima",
-    "two_hop_only",
-    "dense_only",
-    "canonical_only",
     "target_region",
 )
 SYSTEMS = (*MAIN_SYSTEMS, *ABLATIONS)
@@ -40,15 +41,6 @@ def run(command: list[str], *, env: dict[str, str]) -> None:
     subprocess.run(command, cwd=ROOT, env=env, check=True)
 
 
-def _nested(value: dict[str, object], *path: str) -> object | None:
-    current: object = value
-    for key in path:
-        if not isinstance(current, dict) or key not in current:
-            return None
-        current = current[key]
-    return current
-
-
 def complete(path: Path, expected: int) -> bool:
     if not path.is_file():
         return False
@@ -56,12 +48,9 @@ def complete(path: Path, expected: int) -> bool:
         summary = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    count = (
-        summary.get("trials")
-        or summary.get("queries")
-        or _nested(summary, "paper_metrics", "trials")
-        or _nested(summary, "dataset_counts", "trials")
-    )
+    if summary.get("schema") != "polaris-paper-results-v1":
+        return False
+    count = summary.get("trials")
     errors = summary.get("errors", 0)
     return int(count or 0) == expected and int(errors or 0) == 0
 
@@ -249,7 +238,7 @@ def nmfp(dataset: str, args: argparse.Namespace, env: dict[str, str]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Run the complete POLARIS paper matrix.")
     parser.add_argument("--dataset", choices=("sdrr", "pex", "both"), default="both")
     parser.add_argument("--only", action="append", choices=SYSTEMS)
     parser.add_argument("--sdrr", type=Path, default=ROOT / "data" / "sdrr")
@@ -269,7 +258,7 @@ def main() -> int:
         for system in selected:
             if dataset == "pex" and system in ABLATIONS:
                 continue
-            if system in {"polaris", "polaris_adaptive", *ABLATIONS}:
+            if system in {*POLARIS_SYSTEMS, *ABLATIONS}:
                 polaris(dataset, system, args, environment)
             elif system == "audfp_m":
                 audfprint(dataset, "audfp_m", args, environment)
@@ -281,10 +270,11 @@ def main() -> int:
                 olaf(dataset, args, environment)
             elif system == "nmfp":
                 nmfp(dataset, args, environment)
-    run(
-        [sys.executable, "-m", "polaris_eval.report", "--outputs", str(args.output)],
-        env=environment,
-    )
+    if args.dataset == "both" and args.only is None:
+        run(
+            [sys.executable, "-m", "polaris_eval.report", "--outputs", str(args.output)],
+            env=environment,
+        )
     return 0
 
 

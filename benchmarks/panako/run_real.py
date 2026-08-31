@@ -38,10 +38,10 @@ from common import (  # noqa: E402
 from polaris_eval.io import EvaluationError  # noqa: E402
 from polaris_eval.io import write_csv as write_csv_rows  # noqa: E402
 from polaris_eval.io import write_json as write_summary  # noqa: E402
+from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr  # noqa: E402
 from polaris_eval.real import (  # noqa: E402
     RealQuery,
     load_real_manifest,
-    summarize_rows,
     unique_references,
 )
 
@@ -54,22 +54,11 @@ CLOSED_SET_CONFIGURATION = (
     "PANAKO_MIN_SEC_WITH_MATCH=0",
 )
 
-RESULT_FIELDS = (
-    "query_id",
-    "reference_id",
-    "query_seconds",
-    "ground_truth_offset_seconds",
-    "status",
-    "predicted_reference_id",
-    "predicted_offset_seconds",
-    "top1_absolute_offset_error_seconds",
-    "total_time",
-    "error",
-)
+RESULT_FIELDS = SDRR_RESULT_FIELDS
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate Panako on SD-RR.")
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--index", required=True, type=Path)
@@ -82,8 +71,6 @@ def _common(item: RealQuery) -> dict[str, object]:
     return {
         "query_id": item.query_id,
         "reference_id": item.reference_id,
-        "query_seconds": item.query_duration_seconds,
-        "ground_truth_offset_seconds": item.reference_begin_seconds,
     }
 
 
@@ -121,9 +108,10 @@ def evaluate_query(
             "status": "matched" if ranked else "no_match",
             "predicted_reference_id": predicted_reference,
             "predicted_offset_seconds": predicted_offset,
-            "top1_absolute_offset_error_seconds": abs(top1_error)
+            "absolute_offset_error_seconds": abs(top1_error)
             if top1_error is not None
             else None,
+            "query_records": None,
             "total_time": elapsed,
             "error": "",
         }
@@ -134,7 +122,8 @@ def evaluate_query(
             "status": "error",
             "predicted_reference_id": "",
             "predicted_offset_seconds": None,
-            "top1_absolute_offset_error_seconds": None,
+            "absolute_offset_error_seconds": None,
+            "query_records": None,
             "total_time": None,
             "error": f"{type(exc).__name__}: {exc}",
         }
@@ -197,7 +186,7 @@ def main() -> int:
         print(
             f"[{number}/{len(items)}] {item.query_id}: "
             f"predicted={row['predicted_reference_id'] or '-'} "
-            f"offset_error={row['top1_absolute_offset_error_seconds']}",
+            f"offset_error={row['absolute_offset_error_seconds']}",
             flush=True,
         )
 
@@ -207,6 +196,7 @@ def main() -> int:
         [str(java), "-version"], check=False, capture_output=True, text=True
     ).stderr.splitlines()[0]
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
         "system": system,
         "system_version": PANAKO_VERSION,
@@ -223,7 +213,7 @@ def main() -> int:
             "reference_match_start minus query_match_start; ground truth is "
             "reference_begin_seconds from the real-query manifest"
         ),
-        **summarize_rows(rows),
+        **summarize_sdrr(rows),
         "index": {**index_stats, "path": str(database)},
         "provenance": {
             "commit": git_commit_for_jar(jar),

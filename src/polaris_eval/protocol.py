@@ -21,10 +21,7 @@ class OracleSegment:
 
     @property
     def trial_id(self) -> str:
-        return (
-            f"{self.annotation.query_id}:{self.annotation.reference_id}:"
-            f"{self.annotation.query_begin}"
-        )
+        return self.annotation.annotation_id
 
 
 def build_oracle_segments(

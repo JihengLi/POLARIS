@@ -49,7 +49,7 @@ def apply_readonly_query_probe_patch(source: Path) -> None:
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Prepare the pinned OLAF v2.0.10 source.")
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--zig", type=Path, help="zig or python-zig executable")
     parser.add_argument("--check-only", action="store_true")

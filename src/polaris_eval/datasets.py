@@ -21,7 +21,6 @@ class SdrrQuery:
     query_path: Path
     reference_path: Path
     reference_begin_seconds: float
-    query_seconds: float
 
 
 @dataclass(frozen=True)
@@ -109,7 +108,6 @@ def load_sdrr(root: Path, *, enforce_release_shape: bool = True) -> list[SdrrQue
                     query_path=query_path,
                     reference_path=reference_path,
                     reference_begin_seconds=float(row["reference_begin_seconds"]),
-                    query_seconds=query_seconds,
                 )
             )
     if enforce_release_shape and (len(rows) != 1_488 or len(reference_paths) != 496):

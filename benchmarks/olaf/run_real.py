@@ -42,17 +42,18 @@ from common import (  # noqa: E402
 
 from polaris_eval.io import write_csv as write_csv_rows  # noqa: E402
 from polaris_eval.io import write_json as write_summary  # noqa: E402
+from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr  # noqa: E402
 from polaris_eval.real import (  # noqa: E402
-    RESULT_FIELDS,
     RealQuery,
     load_real_manifest,
-    summarize_rows,
     unique_references,
 )
 
+RESULT_FIELDS = SDRR_RESULT_FIELDS
+
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate OLAF v2.0.10 on SD-RR.")
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--index", required=True, type=Path)
@@ -66,8 +67,6 @@ def _common(item: RealQuery) -> dict[str, object]:
     return {
         "query_id": item.query_id,
         "reference_id": item.reference_id,
-        "query_seconds": item.query_duration_seconds,
-        "ground_truth_offset_seconds": item.reference_begin_seconds,
     }
 
 
@@ -93,10 +92,10 @@ def evaluate_query(
             "status": "matched" if matches else "no_match",
             "predicted_reference_id": predicted_reference,
             "predicted_offset_seconds": predicted_offset,
-            "top1_absolute_offset_error_seconds": (
+            "absolute_offset_error_seconds": (
                 abs(top1_error) if top1_error is not None else None
             ),
-            "query_fingerprints": result.query_fingerprints,
+            "query_records": result.query_records,
             "total_time": result.wall_seconds,
             "error": "",
         }
@@ -107,8 +106,8 @@ def evaluate_query(
             "status": "error",
             "predicted_reference_id": "",
             "predicted_offset_seconds": None,
-            "top1_absolute_offset_error_seconds": None,
-            "query_fingerprints": 0,
+            "absolute_offset_error_seconds": None,
+            "query_records": 0,
             "total_time": None,
             "error": f"{type(exc).__name__}: {exc}",
         }
@@ -160,6 +159,7 @@ def main() -> int:
     results_path = output / "query_results.csv"
     write_csv_rows(rows, results_path, RESULT_FIELDS)
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
         "system": "olaf",
         "system_version": OLAF_VERSION,
@@ -180,7 +180,7 @@ def main() -> int:
             "native OLAF reference_start minus query_start; ground truth is "
             "reference_begin_seconds from the real-query manifest"
         ),
-        **summarize_rows(rows),
+        **summarize_sdrr(rows),
         "index": {
             **index_stats,
             "path": str(cli.database),

@@ -41,11 +41,11 @@ from run_pex import (
 from polaris_eval.io import EvaluationError
 from polaris_eval.io import write_csv as write_csv_rows
 from polaris_eval.io import write_json as write_summary
+from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr
 from polaris_eval.real import (
     RealQuery,
     file_sha256,
     load_real_manifest,
-    summarize_rows,
     unique_references,
 )
 
@@ -94,20 +94,7 @@ PROFILES = {
 
 POSTING_MATCH_TARGET = 2_022_662
 
-RESULT_FIELDS = (
-    "profile",
-    "query_id",
-    "reference_id",
-    "query_seconds",
-    "ground_truth_offset_seconds",
-    "status",
-    "predicted_reference_id",
-    "predicted_offset_seconds",
-    "top1_absolute_offset_error_seconds",
-    "query_fingerprints",
-    "total_time",
-    "error",
-)
+RESULT_FIELDS = SDRR_RESULT_FIELDS
 
 
 @dataclass(frozen=True)
@@ -125,7 +112,7 @@ _WORKER_PROFILE: AudfprintProfile | None = None
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate Audfprint on SD-RR.")
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIRECTORY)
@@ -202,13 +189,10 @@ def decode_matches(
     return ranking
 
 
-def _common_result(item: RealQuery, profile: AudfprintProfile) -> dict[str, object]:
+def _common_result(item: RealQuery) -> dict[str, object]:
     return {
-        "profile": profile.name,
         "query_id": item.query_id,
         "reference_id": item.reference_id,
-        "query_seconds": item.query_duration_seconds,
-        "ground_truth_offset_seconds": item.reference_begin_seconds,
     }
 
 
@@ -221,7 +205,7 @@ def evaluate_query(
 ) -> dict[str, object]:
     """Fingerprint, retrieve, and score one real recording query."""
 
-    common = _common_result(item, profile)
+    common = _common_result(item)
     try:
         feature_started = time.perf_counter()
         query_hashes = analyzer.wavfile2hashes(str(item.query_path))
@@ -247,10 +231,10 @@ def evaluate_query(
             "status": "matched" if ranking else "no_match",
             "predicted_reference_id": predicted.reference_id if predicted else "",
             "predicted_offset_seconds": predicted.offset_seconds if predicted else None,
-            "top1_absolute_offset_error_seconds": (
+            "absolute_offset_error_seconds": (
                 abs(top1_error) if top1_error is not None else None
             ),
-            "query_fingerprints": len(query_hashes),
+            "query_records": len(query_hashes),
             "total_time": feature_seconds + lookup_seconds,
             "error": "",
         }
@@ -261,8 +245,8 @@ def evaluate_query(
             "status": "error",
             "predicted_reference_id": "",
             "predicted_offset_seconds": None,
-            "top1_absolute_offset_error_seconds": None,
-            "query_fingerprints": 0,
+            "absolute_offset_error_seconds": None,
+            "query_records": 0,
             "total_time": None,
             "error": f"{type(exc).__name__}: {exc}",
         }
@@ -357,6 +341,7 @@ def run_profile(
     write_csv_rows(rows, results_path, RESULT_FIELDS)
     stored_postings = int(np.sum(np.minimum(table.depth, table.counts), dtype=np.int64))
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
         "system": "audfprint",
         "profile": profile.name,
@@ -399,7 +384,7 @@ def run_profile(
             "Audfprint modal time_skew frames multiplied by n_hop/sample_rate; "
             "ground truth is reference_begin_seconds from the real-query manifest"
         ),
-        **summarize_rows(rows),
+        **summarize_sdrr(rows),
         "index": {
             "path": str(index_path),
             "stored_postings": stored_postings,

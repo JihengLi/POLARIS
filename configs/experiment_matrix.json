@@ -1,9 +1,9 @@
 {
-  "schema": "polaris-experiments-v1",
+  "schema": "polaris-paper-matrix-v1",
   "development_only": {
     "dataset": "PEX Hard Small",
     "reported": false,
-    "use": "method and adaptive stopping parameters were frozen here"
+    "use": "all method and stopping-rule settings were frozen before test evaluation"
   },
   "test_protocols": {
     "pex": {
@@ -15,12 +15,13 @@
       "unit": "oracle-cropped annotation segment"
     },
     "sdrr": {
-      "dataset": "SD-RR v1.0",
+      "dataset": "Song Describer Real Re-recording v1.0",
+      "short_name": "SD-RR",
       "doi": "10.5281/zenodo.22169646",
       "references": 496,
       "queries": 1488,
       "query_seconds": 10,
-      "unit": "smartphone re-recorded query"
+      "unit": "smartphone re-recorded excerpt"
     }
   },
   "main_systems": [
@@ -29,14 +30,16 @@
     "panako",
     "olaf",
     "nmfp",
-    "polaris_adaptive",
-    "polaris"
+    "polaris_o",
+    "polaris_a",
+    "polaris_f"
   ],
-  "sdrr_ablations": [
+  "sdrr_controls": [
     "magnitude_maxima",
-    "two_hop_only",
-    "dense_only",
-    "canonical_only",
     "target_region"
+  ],
+  "two_hop_ablation": [
+    "polaris_o",
+    "polaris_f"
   ]
 }

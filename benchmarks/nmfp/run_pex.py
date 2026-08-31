@@ -10,7 +10,6 @@ Email: jiheng.li.1@vanderbilt.edu
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import sys
@@ -44,11 +43,12 @@ HOP_SECONDS = 0.5
 BATCH_SIZE = 32
 TOP_K = 10
 
-from polaris_eval.metrics import summarize_single_reference_trials
+from polaris_eval.io import write_csv
+from polaris_eval.metrics import PEX_RESULT_FIELDS, summarize_pex
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate NMFP-Triplet on PEX Hard Medium.")
     parser.add_argument("dataset", type=Path, help="Pex dataset directory")
     parser.add_argument("-o", "--output", required=True, type=Path)
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
@@ -300,15 +300,15 @@ def main() -> int:
         elapsed = time.perf_counter() - trial_started
         rows.append(
             {
-                "trial": number,
+                "trial_id": trial.trial_id,
                 "query_id": trial.query_id,
+                "reference_id": trial.reference_id,
                 "query_begin": trial.query_begin,
-                "query_end": trial.query_end,
-                "query_seconds": len(excerpt) / sample_rate,
-                "query_embeddings": len(query_embedding),
-                "expected_reference_id": trial.reference_id,
+                "status": "matched" if ranking else "no_match",
                 "predicted_reference_id": predicted_id,
+                "query_records": len(query_embedding),
                 "total_time": elapsed,
+                "error": "",
             }
         )
         print(
@@ -319,13 +319,11 @@ def main() -> int:
         )
 
     trials_path = output / "query_results.csv"
-    with trials_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(rows, trials_path, PEX_RESULT_FIELDS)
 
     checkpoint_data = model_dir / "ckpt-100.data-00000-of-00001"
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "pex_scale_exact_annotation_retrieval",
         "is_full_pex_file_level_benchmark": False,
         "system": "nmfp-triplet",
@@ -352,15 +350,6 @@ def main() -> int:
             "fingerprints_per_second": 1.0 / HOP_SECONDS,
             "device": "cpu",
         },
-        "dataset_counts": {
-            "all_annotation_rows": len(all_trials),
-            "evaluated_scale_exact_rows": len(trials),
-            "source_scale_exact_rows": len(source_trials),
-            "excluded_scale_changed_rows": len(all_trials) - len(scale_exact_trials(all_trials)),
-            "query_files_represented": len({trial.query_id for trial in trials}),
-            "reference_files_indexed": len(reference_paths),
-            "expected_reference_files": len({trial.reference_id for trial in trials}),
-        },
         "retrieval_configuration": {
             "candidate_generation": (
                 f"exact cosine Top-{TOP_K} per query embedding, equivalent "
@@ -368,7 +357,7 @@ def main() -> int:
             ),
             "reranking": "official continuity candidates + aligned mean cosine",
         },
-        "paper_metrics": summarize_single_reference_trials(rows),
+        **summarize_pex(rows),
         "index": {
             "reference_embeddings": len(database),
         },

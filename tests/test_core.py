@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from scipy.io import wavfile
 
-from polaris import DEFAULT_CONFIG, Polaris, fingerprint, prepare_query
+from polaris import DEFAULT_CONFIG, Polaris, fingerprint_reference, prepare_query
 from polaris.engine import build_reference_index
 from polaris.fingerprint import pack_descriptor, pack_hash
 from polaris.index import build_packed_index
@@ -34,9 +34,9 @@ def test_frozen_configuration_identity():
     config = DEFAULT_CONFIG.to_dict()
     assert config["name"] == "polaris"
     assert config["audio"]["sample_rate"] == 40_000
-    assert config["reference_landmarks"]["landmarks_per_second"] == 22.0
-    assert config["dense_query_landmarks"]["landmarks_per_second"] == 64.0
-    assert config["same_density_query_pairing"]["neighborhood_hops"] == 2
+    assert config["landmarks"]["saliency_threshold"] == 5.0
+    assert config["landmarks"]["landmarks_per_second"] == 22.0
+    assert config["query"]["neighborhood_hops"] == 2
 
 
 def test_packed_descriptor_round_trip_identity():
@@ -46,15 +46,14 @@ def test_packed_descriptor_round_trip_identity():
 
 def test_query_stages_are_nested_and_deterministic():
     samples = _signal()
-    first = set(fingerprint(samples, 40_000, for_query=False))
-    second = set(fingerprint(samples, 40_000, for_query=False))
+    first = fingerprint_reference(samples, 40_000)
+    second = fingerprint_reference(samples, 40_000)
     prepared = prepare_query(samples, 40_000)
-    canonical = prepared.hashes("canonical")
+    original = prepared.hashes("original")
     two_hop = prepared.hashes("two_hop")
-    full = prepared.hashes("full")
     assert first == second
     assert first
-    assert canonical <= two_hop <= full
+    assert original <= two_hop
     digest = hashlib.sha256(repr(sorted(first)).encode()).hexdigest()
     assert len(digest) == 64
 
@@ -67,10 +66,21 @@ def test_end_to_end_file_and_packed_index_agree(tmp_path: Path):
     assert build_reference_index([reference], index, workers=1) == 1
 
     with Polaris(index, index_backend="file") as recognizer:
-        file_result = recognizer.recognize_file(reference, topn=1)
+        file_results = {
+            mode: recognizer.recognize_file(reference, mode=mode, topn=1)
+            for mode in ("o", "a", "f")
+        }
     build_packed_index(index)
     with Polaris(index, index_backend="packed") as recognizer:
-        packed_result = recognizer.recognize_file(reference, topn=1)
+        packed_results = {
+            mode: recognizer.recognize_file(reference, mode=mode, topn=1)
+            for mode in ("o", "a", "f")
+        }
 
-    assert file_result["results"][0]["song_name"] == "reference-a"
-    assert packed_result["results"] == file_result["results"]
+    assert all(
+        result["results"][0]["song_name"] == "reference-a"
+        for result in file_results.values()
+    )
+    assert {
+        mode: result["results"] for mode, result in packed_results.items()
+    } == {mode: result["results"] for mode, result in file_results.items()}

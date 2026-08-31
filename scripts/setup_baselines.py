@@ -118,7 +118,7 @@ def setup_nmfp() -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Install the pinned paper baselines.")
     parser.add_argument("--only", action="append", choices=BASELINES)
     args = parser.parse_args()
     selected = tuple(dict.fromkeys(args.only or BASELINES))

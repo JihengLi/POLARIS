@@ -40,24 +40,14 @@ from common import (  # noqa: E402
 
 from polaris_eval.datasets import load_pex  # noqa: E402
 from polaris_eval.io import write_csv, write_json  # noqa: E402
-from polaris_eval.metrics import summarize_single_reference_trials  # noqa: E402
+from polaris_eval.metrics import PEX_RESULT_FIELDS, summarize_pex  # noqa: E402
 from polaris_eval.protocol import build_oracle_segments, group_oracle_segments  # noqa: E402
 
-FIELDS = (
-    "trial_id",
-    "query_id",
-    "reference_id",
-    "query_begin",
-    "query_end",
-    "query_seconds",
-    "predicted_reference_id",
-    "query_fingerprints",
-    "total_time",
-)
+FIELDS = PEX_RESULT_FIELDS
 
 
 def arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate OLAF v2.0.10 on PEX Hard Medium.")
     parser.add_argument("dataset", type=Path)
     parser.add_argument("--output", "-o", required=True, type=Path)
     parser.add_argument("--index", required=True, type=Path)
@@ -68,7 +58,7 @@ def arguments() -> argparse.Namespace:
 
 
 def evaluate(prepared, cli: OlafCLI, reference_ids: dict[int, str]) -> dict[str, object]:
-    query_id, segment, path, query_seconds = prepared
+    query_id, segment, path = prepared
     result = cli.query(path, reference_ids)
     matches = result.matches
     predicted = candidate_at_rank(matches, 1)
@@ -77,11 +67,11 @@ def evaluate(prepared, cli: OlafCLI, reference_ids: dict[int, str]) -> dict[str,
         "query_id": query_id,
         "reference_id": segment.annotation.reference_id,
         "query_begin": segment.begin,
-        "query_end": segment.end,
-        "query_seconds": query_seconds,
+        "status": "matched" if matches else "no_match",
         "predicted_reference_id": predicted.reference_id if predicted else "",
-        "query_fingerprints": result.query_fingerprints,
+        "query_records": result.query_records,
         "total_time": result.wall_seconds,
+        "error": "",
     }
 
 
@@ -94,7 +84,7 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     try:
         annotations, references, query_paths = load_pex(dataset)
-        source_annotations, segments = build_oracle_segments(annotations)
+        _, segments = build_oracle_segments(annotations)
         grouped = group_oracle_segments(segments)
         reference_ids = numeric_reference_map(references)
         cli = OlafCLI(args.binary, args.index)
@@ -120,7 +110,7 @@ def main() -> int:
                 end_ms = min(len(audio), round(segment.end * 1000))
                 path = temporary / f"query-{len(prepared):06d}.wav"
                 audio[begin_ms:end_ms].export(path, format="wav")
-                prepared.append((query_id, segment, path, (end_ms - begin_ms) / 1000))
+                prepared.append((query_id, segment, path))
 
         def evaluate_one(item):
             return evaluate(item, cli, reference_ids)
@@ -139,17 +129,12 @@ def main() -> int:
     results_path = output / "query_results.csv"
     write_csv(rows, results_path, FIELDS)
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "pex_hard_medium_exact_scale_oracle_segments",
         "system": "olaf",
         "system_version": OLAF_VERSION,
         "dataset": str(dataset),
-        "dataset_counts": {
-            "all_annotations": len(annotations),
-            "trials": len(source_annotations),
-            "references": len(references),
-            "query_files": len(grouped),
-        },
-        "paper_metrics": summarize_single_reference_trials(rows),
+        **summarize_pex(rows),
         "configuration": {
             "implementation": "official standalone C/Zig OLAF",
             "retrieval_profile": PROFILE_NAME,

@@ -107,7 +107,7 @@ def download_sdrr(destination: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Download and verify paper datasets.")
     parser.add_argument("dataset", choices=("sdrr",))
     parser.add_argument("--destination", type=Path, default=Path("data/sdrr"))
     args = parser.parse_args()

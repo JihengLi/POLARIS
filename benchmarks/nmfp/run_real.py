@@ -36,27 +36,15 @@ SOURCE_COMMIT = "e95e2b4009751274b060a6b74c26ae1323daae59"
 from polaris_eval.io import EvaluationError
 from polaris_eval.io import write_csv as write_csv_rows
 from polaris_eval.io import write_json as write_summary
+from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr
 from polaris_eval.real import (
     RealQuery,
     file_sha256,
     load_real_manifest,
-    summarize_rows,
     unique_references,
 )
 
-RESULT_FIELDS = (
-    "query_id",
-    "reference_id",
-    "query_seconds",
-    "ground_truth_offset_seconds",
-    "status",
-    "predicted_reference_id",
-    "predicted_offset_seconds",
-    "top1_absolute_offset_error_seconds",
-    "query_embeddings",
-    "total_time",
-    "error",
-)
+RESULT_FIELDS = SDRR_RESULT_FIELDS
 
 HOP_SECONDS = 0.5
 BATCH_SIZE = 32
@@ -64,7 +52,7 @@ FRAME_TOP_K = 10
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate NMFP-Triplet on SD-RR.")
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
@@ -81,8 +69,6 @@ def _common_result(item: RealQuery) -> dict[str, object]:
     return {
         "query_id": item.query_id,
         "reference_id": item.reference_id,
-        "query_seconds": item.query_duration_seconds,
-        "ground_truth_offset_seconds": item.reference_begin_seconds,
     }
 
 
@@ -118,8 +104,8 @@ def result_from_ranking(
         "status": "matched" if ranking else "no_match",
         "predicted_reference_id": predicted[0] if predicted else "",
         "predicted_offset_seconds": predicted_offset,
-        "top1_absolute_offset_error_seconds": (abs(top1_error) if top1_error is not None else None),
-        "query_embeddings": query_embeddings,
+        "absolute_offset_error_seconds": (abs(top1_error) if top1_error is not None else None),
+        "query_records": query_embeddings,
         "total_time": total_time,
         "error": "",
     }
@@ -132,8 +118,8 @@ def error_result(item: RealQuery, exc: Exception) -> dict[str, object]:
         "status": "error",
         "predicted_reference_id": "",
         "predicted_offset_seconds": None,
-        "top1_absolute_offset_error_seconds": None,
-        "query_embeddings": 0,
+        "absolute_offset_error_seconds": None,
+        "query_records": 0,
         "total_time": None,
         "error": f"{type(exc).__name__}: {exc}",
     }
@@ -272,7 +258,7 @@ def main() -> None:
         print(
             f"[{number}/{len(items)}] {item.query_id}: "
             f"predicted={row['predicted_reference_id'] or '-'} "
-            f"offset_error={row['top1_absolute_offset_error_seconds']}",
+            f"offset_error={row['absolute_offset_error_seconds']}",
             flush=True,
         )
 
@@ -280,6 +266,7 @@ def main() -> None:
     write_csv_rows(rows, results_path, RESULT_FIELDS)
     checkpoint_data = model_dir / "ckpt-100.data-00000-of-00001"
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
         "system": "nmfp-triplet",
         "manifest": str(manifest),
@@ -310,7 +297,7 @@ def main() -> None:
             "best NMFP reference sequence start embedding multiplied by hop_seconds; "
             "ground truth is reference_begin_seconds from the real-query manifest"
         ),
-        **summarize_rows(rows),
+        **summarize_sdrr(rows),
         "index": {
             "reference_files": len(references),
             "reference_embeddings": len(database),

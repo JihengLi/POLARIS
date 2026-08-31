@@ -65,7 +65,7 @@ class OlafMatch:
 @dataclass(frozen=True)
 class OlafQueryResult:
     matches: tuple[OlafMatch, ...]
-    query_fingerprints: int
+    query_records: int
     wall_seconds: float
 
 
@@ -261,7 +261,7 @@ class OlafCLI:
         document = documents[0]
         return OlafQueryResult(
             matches=rank_query_document(document, reference_ids),
-            query_fingerprints=int(document["fingerprints_matched"]),
+            query_records=int(document["fingerprints_matched"]),
             wall_seconds=wall_seconds,
         )
 

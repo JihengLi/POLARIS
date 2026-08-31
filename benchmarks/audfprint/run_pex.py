@@ -36,22 +36,12 @@ from polaris_eval.datasets import load_pex as load_pex_dataset
 from polaris_eval.io import EvaluationError
 from polaris_eval.io import write_csv as write_csv_rows
 from polaris_eval.io import write_json as write_summary
-from polaris_eval.metrics import summarize_single_reference_trials
+from polaris_eval.metrics import PEX_RESULT_FIELDS, summarize_pex
 
 ADAPTER_DIRECTORY = Path(__file__).resolve().parent
 DEFAULT_SOURCE_DIRECTORY = ADAPTER_DIRECTORY / ".cache" / "audfprint"
 EXPECTED_SOURCE_COMMIT = "cb03ba99feafd41b8874307f0f4e808a6ce34362"
-TRIAL_FIELDS = (
-    "trial_id",
-    "query_id",
-    "reference_id",
-    "query_begin",
-    "query_end",
-    "query_seconds",
-    "predicted_reference_id",
-    "query_fingerprints",
-    "total_time",
-)
+TRIAL_FIELDS = PEX_RESULT_FIELDS
 
 _WORKER_ANALYZER: Any | None = None
 _WORKER_ANALYZE_MODULE: Any | None = None
@@ -76,7 +66,7 @@ PROFILES = {
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Evaluate Audfprint on PEX Hard Medium.")
     parser.add_argument("dataset", type=Path)
     parser.add_argument("-o", "--output", required=True, type=Path)
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIRECTORY)
@@ -213,11 +203,11 @@ def evaluate_query_group(
                 "query_id": query_id,
                 "reference_id": annotation.reference_id,
                 "query_begin": begin,
-                "query_end": end,
-                "query_seconds": len(excerpt) / actual_sample_rate,
+                "status": "matched" if ranking else "no_match",
                 "predicted_reference_id": predicted_id,
-                "query_fingerprints": len(query_hashes),
+                "query_records": len(query_hashes),
                 "total_time": feature_seconds + lookup_seconds,
+                "error": "",
             }
         )
     return rows
@@ -277,7 +267,7 @@ def trial_segments(
             annotation,
             float(annotation.query_begin),
             float(annotation.query_end),
-            f"{annotation.query_id}:{annotation.reference_id}:{annotation.query_begin}",
+            annotation.annotation_id,
         )
         for annotation in annotations
     ]
@@ -426,8 +416,8 @@ def main() -> int:
     trials_path = output / "query_results.csv"
     write_csv_rows(rows, trials_path, TRIAL_FIELDS)
     stored_postings = int(np.sum(np.minimum(table.depth, table.counts), dtype=np.int64))
-    paper_metrics = summarize_single_reference_trials(rows)
     summary = {
+        "schema": "polaris-paper-results-v1",
         "protocol": "pex_oracle_segment_exact_scale_v1",
         "system": "audfprint",
         "dataset": str(dataset),
@@ -457,15 +447,7 @@ def main() -> int:
             "search_depth": args.search_depth,
             "top_k": args.top_k,
         },
-        "dataset_counts": {
-            "all_annotations": len(annotations),
-            "exact_scale_annotations": len(source_annotations),
-            "evaluated_source_annotations": len(source_annotations),
-            "trials": len(segments),
-            "references": len(reference_paths),
-            "query_files": len(grouped),
-        },
-        "paper_metrics": paper_metrics,
+        **summarize_pex(rows),
         "index": {
             "path": str(index_path),
             "stored_postings": stored_postings,

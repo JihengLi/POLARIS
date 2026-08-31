@@ -34,6 +34,8 @@ SOURCE_COMMIT = "e95e2b4009751274b060a6b74c26ae1323daae59"
 class Trial:
     reference_id: str
     query_id: str
+    reference_begin: int
+    reference_end: int
     query_begin: int
     query_end: int
     tempo: str
@@ -42,6 +44,20 @@ class Trial:
     @property
     def scale_exact(self) -> bool:
         return self.tempo in ("", "100") and self.pitch in ("", "0")
+
+    @property
+    def trial_id(self) -> str:
+        return ":".join(
+            str(value)
+            for value in (
+                self.reference_id,
+                self.query_id,
+                self.reference_begin,
+                self.reference_end,
+                self.query_begin,
+                self.query_end,
+            )
+        )
 
 
 def _find_audio(directory: Path) -> dict[str, Path]:
@@ -74,6 +90,8 @@ def load_trials(dataset: Path) -> tuple[list[Trial], dict[str, Path], dict[str, 
                 Trial(
                     reference_id=reference_id,
                     query_id=query_id,
+                    reference_begin=int(row["reference_begin"]),
+                    reference_end=int(row["reference_end"]),
                     query_begin=int(row["query_begin"]),
                     query_end=int(row["query_end"]),
                     tempo=row.get("tempo", "").strip(),
