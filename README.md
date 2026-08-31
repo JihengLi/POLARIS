@@ -1,7 +1,7 @@
 # POLARIS
 
 This repository reproduces the experiments in **POLARIS: Training-Free Audio
-Fingerprinting with Delaunay Landmark Grouping and Query-Side Expansion**. It
+Fingerprinting with Saliency-Based Landmarks and Delaunay Grouping**. It
 contains the final method, the two controlled variants used in the ablation
 table, and adapters for every baseline in the paper.
 
@@ -11,10 +11,10 @@ two-hop Delaunay neighborhoods at query time.
 
 ## Paper protocols
 
-| Dataset | References | Test queries | Use |
-|---|---:|---:|---|
-| PEX Hard Medium, exact scale | 953 | 791 oracle-cropped annotations | controlled synthetic distortions |
-| SD-RR v1.0 | 496 | 1,488 ten-second recordings | real smartphone re-recordings |
+| Dataset                      | References |                   Test queries | Use                              |
+| ---------------------------- | ---------: | -----------------------------: | -------------------------------- |
+| PEX Hard Medium, exact scale |        953 | 791 oracle-cropped annotations | controlled synthetic distortions |
+| SD-RR v1.0                   |        496 |    1,488 ten-second recordings | real smartphone re-recordings    |
 
 The PEX loader retains only annotations whose tempo is empty or `100` and
 whose pitch is empty or `0`. PEX Hard Small was used for development and is
