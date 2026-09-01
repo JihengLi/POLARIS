@@ -79,7 +79,6 @@ def _recognize(samples: np.ndarray, sample_rate: int) -> dict[str, object]:
     results = _RECOGNIZER.recognize_hashes(hashes, topn=2)
     return {
         "query_records": len(hashes),
-        "query_stage": "two_hop" if _SYSTEM == "magnitude_maxima" else "original",
         "total_time": perf_counter() - started,
         "results": results,
     }
@@ -105,7 +104,7 @@ def _sdrr_result_row(
         and ground_truth_offset is not None
         else None
     )
-    return {
+    row = {
         "query_id": query_id,
         "reference_id": reference_id,
         "status": "matched" if matches else "no_match",
@@ -113,18 +112,22 @@ def _sdrr_result_row(
         "predicted_offset_seconds": predicted_offset,
         "absolute_offset_error_seconds": offset_error,
         "query_records": int(recognition.get("query_records") or 0),
-        "query_stage": str(recognition.get("query_stage") or ""),
         "total_time": recognition.get("total_time"),
         "error": "",
     }
+    if "query_stage" in recognition:
+        row["query_stage"] = str(recognition["query_stage"])
+    return row
 
 
 def _sdrr_error_row(
     query_id: str,
     reference_id: str,
     error: Exception,
+    *,
+    include_query_stage: bool,
 ) -> dict[str, object]:
-    return {
+    row = {
         "query_id": query_id,
         "reference_id": reference_id,
         "status": "error",
@@ -132,10 +135,12 @@ def _sdrr_error_row(
         "predicted_offset_seconds": None,
         "absolute_offset_error_seconds": None,
         "query_records": 0,
-        "query_stage": "",
         "total_time": None,
         "error": f"{type(error).__name__}: {error}",
     }
+    if include_query_stage:
+        row["query_stage"] = ""
+    return row
 
 
 def _pex_result_row(
@@ -151,7 +156,6 @@ def _pex_result_row(
         "query_begin": item.query_begin,
         "status": "matched" if matches else "no_match",
         "predicted_reference_id": str(top.get("song_name") or ""),
-        "query_records": int(recognition.get("query_records") or 0),
         "query_stage": str(recognition.get("query_stage") or ""),
         "total_time": recognition.get("total_time"),
         "error": "",
@@ -166,7 +170,6 @@ def _pex_error_row(item: PexAnnotation, error: Exception) -> dict[str, object]:
         "query_begin": item.query_begin,
         "status": "error",
         "predicted_reference_id": "",
-        "query_records": 0,
         "query_stage": "",
         "total_time": None,
         "error": f"{type(error).__name__}: {error}",
@@ -186,7 +189,12 @@ def _sdrr_worker(item: SdrrQuery) -> dict[str, object]:
             recognition=recognition,
         )
     except Exception as error:
-        return _sdrr_error_row(item.query_id, item.reference_id, error)
+        return _sdrr_error_row(
+            item.query_id,
+            item.reference_id,
+            error,
+            include_query_stage=_SYSTEM in POLARIS_SYSTEMS,
+        )
 
 
 def _pex_worker(task: tuple[Path, tuple[PexAnnotation, ...]]) -> list[dict[str, object]]:
@@ -246,6 +254,11 @@ def _summary(
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "schema": "polaris-paper-results-v1",
+        "protocol": (
+            "sdrr_closed_set_retrieval_and_offset_v1"
+            if dataset == "sdrr"
+            else "pex_oracle_segment_exact_scale_v1"
+        ),
         "dataset": dataset,
         "system": system,
         **(summarize_sdrr(rows) if dataset == "sdrr" else summarize_pex(rows)),
@@ -299,6 +312,7 @@ def evaluate(
     index: Path,
     output: Path,
     workers: int,
+    force: bool = False,
 ) -> dict[str, object]:
     if dataset == "pex" and system in CONTROL_SYSTEMS:
         raise EvaluationError("paper controls are evaluated only on SD-RR")
@@ -354,12 +368,22 @@ def evaluate(
     output.mkdir(parents=True, exist_ok=True)
     write_json(_resolved(system), output / "resolved_configuration.json")
     results_path = output / "query_results.csv"
-    fields = POLARIS_SDRR_FIELDS if dataset == "sdrr" else POLARIS_PEX_FIELDS
+    fields = (
+        POLARIS_SDRR_FIELDS
+        if dataset == "sdrr" and system in POLARIS_SYSTEMS
+        else SDRR_RESULT_FIELDS
+        if dataset == "sdrr"
+        else POLARIS_PEX_FIELDS
+    )
     id_field = "query_id" if dataset == "sdrr" else "trial_id"
-    rows: dict[str, dict[str, object] | dict[str, str]] = _load_completed(
-        results_path,
-        fields=fields,
-        id_field=id_field,
+    rows: dict[str, dict[str, object] | dict[str, str]] = (
+        {}
+        if force
+        else _load_completed(
+            results_path,
+            fields=fields,
+            id_field=id_field,
+        )
     )
     if dataset == "sdrr":
         remaining = [task for task in tasks if task.query_id not in rows]  # type: ignore[attr-defined]
@@ -414,6 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path("outputs"))
     parser.add_argument("--workers", type=int, default=max(1, min(6, os.cpu_count() or 1)))
+    parser.add_argument("--force", action="store_true", help="ignore saved query rows")
     args = parser.parse_args(argv)
     default_systems = POLARIS_SYSTEMS if args.dataset == "pex" else SYSTEMS
     systems = tuple(dict.fromkeys(args.system or default_systems))
@@ -433,6 +458,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             / f"{reference_key(system)}_index",
             output=output_root / args.dataset / system,
             workers=args.workers,
+            force=args.force,
         )
         print(json.dumps(summary, indent=2, ensure_ascii=False), flush=True)
     return 0

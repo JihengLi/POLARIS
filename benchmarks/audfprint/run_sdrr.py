@@ -38,16 +38,11 @@ from run_pex import (
     source_commit,
 )
 
-from polaris_eval.io import EvaluationError
+from polaris_eval.datasets import SdrrQuery, load_sdrr, unique_sdrr_references
+from polaris_eval.io import EvaluationError, sha256
 from polaris_eval.io import write_csv as write_csv_rows
 from polaris_eval.io import write_json as write_summary
 from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr
-from polaris_eval.real import (
-    RealQuery,
-    file_sha256,
-    load_real_manifest,
-    unique_references,
-)
 
 
 @dataclass(frozen=True)
@@ -85,8 +80,8 @@ PROFILES = {
         fanout=4,
         bucket_depth=100,
         search_depth=2_000,
-        query_density=1_440.0,
-        query_fanout=86,
+        query_density=504.0,
+        query_fanout=30,
         query_max_peaks_per_frame=11,
         reference_index_key="audfp_m",
     ),
@@ -113,7 +108,7 @@ _WORKER_PROFILE: AudfprintProfile | None = None
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate Audfprint on SD-RR.")
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("dataset", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIRECTORY)
     parser.add_argument("--profile", choices=tuple(PROFILES), required=True)
@@ -189,7 +184,7 @@ def decode_matches(
     return ranking
 
 
-def _common_result(item: RealQuery) -> dict[str, object]:
+def _common_result(item: SdrrQuery) -> dict[str, object]:
     return {
         "query_id": item.query_id,
         "reference_id": item.reference_id,
@@ -200,7 +195,7 @@ def evaluate_query(
     analyzer: Any,
     matcher: Any,
     table: Any,
-    item: RealQuery,
+    item: SdrrQuery,
     profile: AudfprintProfile,
 ) -> dict[str, object]:
     """Fingerprint, retrieve, and score one real recording query."""
@@ -268,7 +263,7 @@ def _initialize_query_worker(
     _WORKER_PROFILE = profile
 
 
-def _evaluate_query_worker(item: RealQuery) -> dict[str, object]:
+def _evaluate_query_worker(item: SdrrQuery) -> dict[str, object]:
     if any(
         value is None
         for value in (
@@ -290,7 +285,7 @@ def _evaluate_query_worker(item: RealQuery) -> dict[str, object]:
 
 def run_profile(
     profile: AudfprintProfile,
-    items: list[RealQuery],
+    items: list[SdrrQuery],
     manifest: Path,
     output: Path,
     source_directory: Path,
@@ -342,11 +337,10 @@ def run_profile(
     stored_postings = int(np.sum(np.minimum(table.depth, table.counts), dtype=np.int64))
     summary = {
         "schema": "polaris-paper-results-v1",
-        "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
-        "system": "audfprint",
-        "profile": profile.name,
+        "protocol": "sdrr_closed_set_retrieval_and_offset_v1",
+        "system": profile.name,
         "manifest": str(manifest),
-        "manifest_sha256": file_sha256(manifest),
+        "manifest_sha256": sha256(manifest),
         "configuration": asdict(profile),
         "profile_selection": (
             {
@@ -382,7 +376,7 @@ def run_profile(
         },
         "offset_definition": (
             "Audfprint modal time_skew frames multiplied by n_hop/sample_rate; "
-            "ground truth is reference_begin_seconds from the real-query manifest"
+            "ground truth is reference_begin_seconds from the SD-RR manifest"
         ),
         **summarize_sdrr(rows),
         "index": {
@@ -403,13 +397,14 @@ def main() -> None:
     args = parse_args()
     if args.query_workers <= 0:
         raise SystemExit("--query-workers must be positive")
-    manifest = args.manifest.expanduser().resolve()
+    dataset = args.dataset.expanduser().resolve()
+    manifest = dataset / "manifest.csv"
     output = args.output.expanduser().resolve()
     source_directory = args.source_dir.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
     try:
-        all_items = load_real_manifest(manifest)
-        references = unique_references(all_items)
+        all_items = load_sdrr(dataset)
+        references = unique_sdrr_references(all_items)
         items = list(all_items)
         analyze_module, match_module, table_module = load_audfprint(source_directory)
     except (EvaluationError, OSError, json.JSONDecodeError) as exc:

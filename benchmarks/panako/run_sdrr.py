@@ -35,15 +35,15 @@ from common import (  # noqa: E402
     resolve_native_library_path,
 )
 
+from polaris_eval.datasets import (  # noqa: E402
+    SdrrQuery,
+    load_sdrr,
+    unique_sdrr_references,
+)
 from polaris_eval.io import EvaluationError  # noqa: E402
 from polaris_eval.io import write_csv as write_csv_rows  # noqa: E402
 from polaris_eval.io import write_json as write_summary  # noqa: E402
 from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr  # noqa: E402
-from polaris_eval.real import (  # noqa: E402
-    RealQuery,
-    load_real_manifest,
-    unique_references,
-)
 
 CLOSED_SET_CONFIGURATION = (
     # Reject-disabled Panako protocol used by Serrano and Scarpa
@@ -54,12 +54,12 @@ CLOSED_SET_CONFIGURATION = (
     "PANAKO_MIN_SEC_WITH_MATCH=0",
 )
 
-RESULT_FIELDS = SDRR_RESULT_FIELDS
+RESULT_FIELDS = tuple(field for field in SDRR_RESULT_FIELDS if field != "query_records")
 
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate Panako on SD-RR.")
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("dataset", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--index", required=True, type=Path)
     parser.add_argument("--jar", type=Path, default=DEFAULT_JAR)
@@ -67,7 +67,7 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _common(item: RealQuery) -> dict[str, object]:
+def _common(item: SdrrQuery) -> dict[str, object]:
     return {
         "query_id": item.query_id,
         "reference_id": item.reference_id,
@@ -76,11 +76,11 @@ def _common(item: RealQuery) -> dict[str, object]:
 
 def evaluate_query(
     cli: PanakoCLI,
-    item: RealQuery,
+    item: SdrrQuery,
     query_configuration: tuple[str, ...] = CLOSED_SET_CONFIGURATION,
 ) -> dict[str, object]:
     try:
-        ranked, _, elapsed, _ = query_one_file(
+        ranked, elapsed = query_one_file(
             cli,
             item.query_id,
             item.query_path,
@@ -111,7 +111,6 @@ def evaluate_query(
             "absolute_offset_error_seconds": abs(top1_error)
             if top1_error is not None
             else None,
-            "query_records": None,
             "total_time": elapsed,
             "error": "",
         }
@@ -123,7 +122,6 @@ def evaluate_query(
             "predicted_reference_id": "",
             "predicted_offset_seconds": None,
             "absolute_offset_error_seconds": None,
-            "query_records": None,
             "total_time": None,
             "error": f"{type(exc).__name__}: {exc}",
         }
@@ -135,7 +133,8 @@ def main() -> int:
     system = "panako"
     strategy = "PANAKO"
     query_configuration = CLOSED_SET_CONFIGURATION
-    manifest = args.manifest.expanduser().resolve()
+    dataset = args.dataset.expanduser().resolve()
+    manifest = dataset / "manifest.csv"
     output = args.output.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
     index = args.index.expanduser().resolve()
@@ -144,8 +143,8 @@ def main() -> int:
     try:
         if not jar.is_file():
             raise EvaluationError(f"Panako JAR does not exist: {jar}")
-        all_items = load_real_manifest(manifest)
-        references = unique_references(all_items)
+        all_items = load_sdrr(dataset)
+        references = unique_sdrr_references(all_items)
         items = list(all_items)
         java = resolve_java(None)
         native_library = resolve_native_library_path(None)
@@ -197,7 +196,7 @@ def main() -> int:
     ).stderr.splitlines()[0]
     summary = {
         "schema": "polaris-paper-results-v1",
-        "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
+        "protocol": "sdrr_closed_set_retrieval_and_offset_v1",
         "system": system,
         "system_version": PANAKO_VERSION,
         "manifest": str(manifest),
@@ -211,7 +210,7 @@ def main() -> int:
         },
         "offset_definition": (
             "reference_match_start minus query_match_start; ground truth is "
-            "reference_begin_seconds from the real-query manifest"
+            "reference_begin_seconds from the SD-RR manifest"
         ),
         **summarize_sdrr(rows),
         "index": {**index_stats, "path": str(database)},

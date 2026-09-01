@@ -33,28 +33,27 @@ from common import (  # noqa: E402
     OlafAdapterError,
     OlafCLI,
     build_reference_index,
-    candidate_at_rank,
     ffmpeg_version,
     file_sha256,
     numeric_reference_map,
     validate_index,
 )
 
+from polaris_eval.datasets import (  # noqa: E402
+    SdrrQuery,
+    load_sdrr,
+    unique_sdrr_references,
+)
 from polaris_eval.io import write_csv as write_csv_rows  # noqa: E402
 from polaris_eval.io import write_json as write_summary  # noqa: E402
 from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr  # noqa: E402
-from polaris_eval.real import (  # noqa: E402
-    RealQuery,
-    load_real_manifest,
-    unique_references,
-)
 
 RESULT_FIELDS = SDRR_RESULT_FIELDS
 
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate OLAF v2.0.10 on SD-RR.")
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("dataset", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--index", required=True, type=Path)
     parser.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
@@ -63,7 +62,7 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _common(item: RealQuery) -> dict[str, object]:
+def _common(item: SdrrQuery) -> dict[str, object]:
     return {
         "query_id": item.query_id,
         "reference_id": item.reference_id,
@@ -72,14 +71,14 @@ def _common(item: RealQuery) -> dict[str, object]:
 
 def evaluate_query(
     cli: OlafCLI,
-    item: RealQuery,
+    item: SdrrQuery,
     reference_ids: dict[int, str],
 ) -> dict[str, object]:
     common = _common(item)
     try:
         result = cli.query(item.query_path, reference_ids)
         matches = result.matches
-        predicted = candidate_at_rank(matches, 1)
+        predicted = matches[0] if matches else None
         predicted_offset = predicted.offset_seconds if predicted else None
         predicted_reference = predicted.reference_id if predicted else ""
         top1_error = (
@@ -117,12 +116,13 @@ def main() -> int:
     args = parse_arguments()
     if args.workers <= 0:
         raise SystemExit("--workers must be positive")
-    manifest = args.manifest.expanduser().resolve()
+    dataset = args.dataset.expanduser().resolve()
+    manifest = dataset / "manifest.csv"
     output = args.output.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
     try:
-        all_items = load_real_manifest(manifest)
-        references = unique_references(all_items)
+        all_items = load_sdrr(dataset)
+        references = unique_sdrr_references(all_items)
         reference_ids = numeric_reference_map(references)
         items = list(all_items)
         cli = OlafCLI(args.binary, args.index)
@@ -137,7 +137,7 @@ def main() -> int:
     except (OlafAdapterError, OSError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
-    def evaluate(item: RealQuery) -> dict[str, object]:
+    def evaluate(item: SdrrQuery) -> dict[str, object]:
         return evaluate_query(cli, item, reference_ids)
 
     rows: list[dict[str, object]] = []
@@ -160,7 +160,7 @@ def main() -> int:
     write_csv_rows(rows, results_path, RESULT_FIELDS)
     summary = {
         "schema": "polaris-paper-results-v1",
-        "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
+        "protocol": "sdrr_closed_set_retrieval_and_offset_v1",
         "system": "olaf",
         "system_version": OLAF_VERSION,
         "manifest": str(manifest),
@@ -178,7 +178,7 @@ def main() -> int:
         },
         "offset_definition": (
             "native OLAF reference_start minus query_start; ground truth is "
-            "reference_begin_seconds from the real-query manifest"
+            "reference_begin_seconds from the SD-RR manifest"
         ),
         **summarize_sdrr(rows),
         "index": {

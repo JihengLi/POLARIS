@@ -14,7 +14,7 @@ archives after successful extraction, so it does not keep duplicate audio.
 
 PEX must be obtained from its official distribution. Place the untouched Hard
 Medium directory at `data/pex_hard_medium`; it must directly contain
-`annotations.csv`, `references/`, and `queries/`. POLARIS evaluates all 791
+`annotations.csv`, `fma_tracks.csv`, `references/`, and `queries/`. POLARIS evaluates all 791
 annotations whose tempo is empty/100 and whose pitch is empty/0. PEX Hard
 Small was used only as a development set and is not part of the reported test
 runner.

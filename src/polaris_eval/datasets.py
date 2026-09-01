@@ -62,7 +62,7 @@ def _resolve_audio(root: Path, raw: str, kind: str) -> Path:
     return path
 
 
-def load_sdrr(root: Path, *, enforce_release_shape: bool = True) -> list[SdrrQuery]:
+def load_sdrr(root: Path) -> list[SdrrQuery]:
     root = root.expanduser().resolve()
     manifest = root / "manifest.csv"
     if not manifest.is_file():
@@ -110,7 +110,7 @@ def load_sdrr(root: Path, *, enforce_release_shape: bool = True) -> list[SdrrQue
                     reference_begin_seconds=float(row["reference_begin_seconds"]),
                 )
             )
-    if enforce_release_shape and (len(rows) != 1_488 or len(reference_paths) != 496):
+    if len(rows) != 1_488 or len(reference_paths) != 496:
         raise EvaluationError(
             f"SD-RR v1.0 requires 496 references/1,488 queries; found "
             f"{len(reference_paths)}/{len(rows)}"

@@ -7,12 +7,10 @@ Email: jiheng.li.1@vanderbilt.edu
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,78 +26,6 @@ DEFAULT_MODEL_DIR = (
     DEFAULT_SOURCE_DIR / "logs" / "nmfp" / "fma-nmfp_deg" / "checkpoint" / "nmfp-triplet"
 )
 SOURCE_COMMIT = "e95e2b4009751274b060a6b74c26ae1323daae59"
-
-
-@dataclass(frozen=True)
-class Trial:
-    reference_id: str
-    query_id: str
-    reference_begin: int
-    reference_end: int
-    query_begin: int
-    query_end: int
-    tempo: str
-    pitch: str
-
-    @property
-    def scale_exact(self) -> bool:
-        return self.tempo in ("", "100") and self.pitch in ("", "0")
-
-    @property
-    def trial_id(self) -> str:
-        return ":".join(
-            str(value)
-            for value in (
-                self.reference_id,
-                self.query_id,
-                self.reference_begin,
-                self.reference_end,
-                self.query_begin,
-                self.query_end,
-            )
-        )
-
-
-def _find_audio(directory: Path) -> dict[str, Path]:
-    supported = {".wav", ".flac", ".mp3", ".aac", ".ogg"}
-    paths: dict[str, Path] = {}
-    for path in sorted(directory.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in supported:
-            continue
-        if path.stem in paths:
-            raise SystemExit(f"duplicate audio id {path.stem!r} in {directory}")
-        paths[path.stem] = path.resolve()
-    return paths
-
-
-def load_trials(dataset: Path) -> tuple[list[Trial], dict[str, Path], dict[str, Path]]:
-    annotations_path = dataset / "annotations.csv"
-    references = _find_audio(dataset / "references")
-    queries = _find_audio(dataset / "queries")
-    if not annotations_path.is_file() or not references or not queries:
-        raise SystemExit(f"invalid or empty PEX dataset: {dataset}")
-
-    trials = []
-    with annotations_path.open(encoding="utf-8-sig", newline="") as handle:
-        for line_number, row in enumerate(csv.DictReader(handle), start=2):
-            reference_id = row["reference_id"].strip()
-            query_id = row["query_id"].strip()
-            if reference_id not in references or query_id not in queries:
-                raise SystemExit(f"annotations.csv line {line_number} refers to missing audio")
-            trials.append(
-                Trial(
-                    reference_id=reference_id,
-                    query_id=query_id,
-                    reference_begin=int(row["reference_begin"]),
-                    reference_end=int(row["reference_end"]),
-                    query_begin=int(row["query_begin"]),
-                    query_end=int(row["query_end"]),
-                    tempo=row.get("tempo", "").strip(),
-                    pitch=row.get("pitch", "").strip(),
-                )
-            )
-    return trials, references, queries
-
 
 def _official_modules(source_dir: Path) -> tuple[Any, Any, Any]:
     if not (source_dir / "nmfp").is_dir():

@@ -13,7 +13,7 @@ import os
 import platform
 import re
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -49,13 +49,8 @@ class OlafAdapterError(RuntimeError):
 @dataclass(frozen=True)
 class OlafMatch:
     reference_id: str
-    match_identifier: int
-    score: int
     query_start: float
-    query_stop: float
     reference_start: float
-    reference_stop: float
-    reference_path: str
 
     @property
     def offset_seconds(self) -> float:
@@ -168,13 +163,8 @@ def rank_query_document(
         ranked.append(
             OlafMatch(
                 reference_id=reference_id,
-                match_identifier=internal_id,
-                score=int(raw["match_count"]),
                 query_start=float(raw["query_start"]),
-                query_stop=float(raw["query_stop"]),
                 reference_start=float(raw["reference_start"]),
-                reference_stop=float(raw["reference_stop"]),
-                reference_path=str(raw.get("path") or ""),
             )
         )
     return tuple(ranked)
@@ -332,6 +322,11 @@ def build_reference_index(
             "existing OLAF v2.0.10 index metadata does not match this reference "
             "collection; choose a new --index directory"
         )
+    if (cli.database / "data.mdb").is_file():
+        raise OlafAdapterError(
+            "OLAF index contains stored data but has no completion metadata; "
+            "remove this incomplete generated index or choose a new --index directory"
+        )
     started = perf_counter()
     records: dict[int, dict[str, object]] = {}
     ordered = sorted(references.items())
@@ -404,7 +399,3 @@ def validate_index(cli: OlafCLI, references: Mapping[str, Path]) -> dict[str, fl
 def ffmpeg_version() -> str:
     result = subprocess.run(["ffmpeg", "-version"], check=True, capture_output=True, text=True)
     return result.stdout.splitlines()[0]
-
-
-def candidate_at_rank(matches: Sequence[OlafMatch], rank: int) -> OlafMatch | None:
-    return matches[rank - 1] if 0 < rank <= len(matches) else None

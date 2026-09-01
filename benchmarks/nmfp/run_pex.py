@@ -31,11 +31,9 @@ from common import (
     DEFAULT_MODEL_DIR,
     DEFAULT_SOURCE_DIR,
     SOURCE_COMMIT,
-    Trial,
     file_md5,
     infer_embeddings,
     load_model,
-    load_trials,
     source_commit,
 )
 
@@ -43,6 +41,7 @@ HOP_SECONDS = 0.5
 BATCH_SIZE = 32
 TOP_K = 10
 
+from polaris_eval.datasets import load_pex
 from polaris_eval.io import write_csv
 from polaris_eval.metrics import PEX_RESULT_FIELDS, summarize_pex
 
@@ -59,10 +58,6 @@ def parse_arguments() -> argparse.Namespace:
         help="Reusable directory of per-reference NMFP embeddings",
     )
     return parser.parse_args()
-
-
-def scale_exact_trials(trials: list[Trial]) -> list[Trial]:
-    return [trial for trial in trials if trial.scale_exact]
 
 
 def atomic_save_array(path: Path, array: np.ndarray) -> None:
@@ -184,17 +179,16 @@ def rank_query(
     track_ids: list[str],
     *,
     top_k: int,
-) -> tuple[list[tuple[str, float, int]], int]:
+) -> list[tuple[str, float, int]]:
     nearest = exact_top_k(query, database, top_k)
     starts, track_indices = candidate_starts(nearest, track_starts, track_ends)
-    ranking = rerank_candidates(
+    return rerank_candidates(
         query,
         database,
         starts,
         track_indices,
         track_ids,
     )
-    return ranking, len(starts)
 
 
 def main() -> int:
@@ -210,10 +204,8 @@ def main() -> int:
         else output / "embedding_cache" / "references"
     )
 
-    all_trials, reference_paths, query_paths = load_trials(dataset)
-    source_trials = scale_exact_trials(all_trials)
-    if not source_trials:
-        raise SystemExit("Pex dataset contains no scale-exact annotations")
+    annotations, reference_paths, query_paths = load_pex(dataset)
+    trials = [annotation for annotation in annotations if annotation.exact_scale]
 
     model, frontend, config, es, segment_audio = load_model(model_dir, source_dir)
     sample_rate = int(config["MODEL"]["AUDIO"]["FS"])
@@ -229,8 +221,6 @@ def main() -> int:
             )(),
             dtype=np.float32,
         )
-
-    trials = source_trials
 
     decoded_queries: dict[str, np.ndarray] = {}
 
@@ -288,7 +278,7 @@ def main() -> int:
             hop_seconds=HOP_SECONDS,
             batch_size=BATCH_SIZE,
         )
-        ranking, _candidate_count = rank_query(
+        ranking = rank_query(
             query_embedding,
             database,
             track_starts,
@@ -300,13 +290,12 @@ def main() -> int:
         elapsed = time.perf_counter() - trial_started
         rows.append(
             {
-                "trial_id": trial.trial_id,
+                "trial_id": trial.annotation_id,
                 "query_id": trial.query_id,
                 "reference_id": trial.reference_id,
                 "query_begin": trial.query_begin,
                 "status": "matched" if ranking else "no_match",
                 "predicted_reference_id": predicted_id,
-                "query_records": len(query_embedding),
                 "total_time": elapsed,
                 "error": "",
             }
@@ -324,14 +313,9 @@ def main() -> int:
     checkpoint_data = model_dir / "ckpt-100.data-00000-of-00001"
     summary = {
         "schema": "polaris-paper-results-v1",
-        "protocol": "pex_scale_exact_annotation_retrieval",
-        "is_full_pex_file_level_benchmark": False,
-        "system": "nmfp-triplet",
+        "protocol": "pex_oracle_segment_exact_scale_v1",
+        "system": "nmfp",
         "dataset": str(dataset),
-        "definition": (
-            "All eligible Pex annotations with tempo=100 and pitch=0/empty; "
-            "each ground-truth excerpt is searched against all references."
-        ),
         "source": {
             "repository": "https://github.com/raraz15/neural-music-fp",
             "commit": source_commit(source_dir),
@@ -347,7 +331,6 @@ def main() -> int:
             "embedding_dimensions": dimensions,
             "segment_seconds": segment_seconds,
             "hop_seconds": HOP_SECONDS,
-            "fingerprints_per_second": 1.0 / HOP_SECONDS,
             "device": "cpu",
         },
         "retrieval_configuration": {

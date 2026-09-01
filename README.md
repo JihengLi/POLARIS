@@ -24,7 +24,8 @@ The reproduced POLARIS systems are:
 
 - `polaris_o`: four STFT shifts, adjacent-bin probing, and original Delaunay
   faces only;
-- `polaris_f`: `polaris_o` plus two-hop query triples;
+- `polaris_f`: `polaris_o` plus at most 24 additional two-hop query triples
+  per landmark;
 - `polaris_a`: starts from `polaris_o` and adds the two-hop query hashes unless
   the top result has at least eight matching hashes and a score margin of at
   least 0.40.
@@ -101,7 +102,9 @@ bash scripts/reproduce_all.sh --dataset pex --only nmfp
 
 The runner resumes complete outputs and reuses compatible reference indexes.
 The two controls run only on SD-RR. POLARIS-O, POLARIS-A, and POLARIS-F share
-one reference index.
+one reference index. Reference insertion, fingerprint serialization, query
+iteration, and score ties use explicit deterministic orderings, so changing
+the worker count does not turn tied candidates into chance outcomes.
 
 Every experiment writes `query_results.csv` and `summary.json`. POLARIS and its
 controls additionally write the fully resolved method configuration:

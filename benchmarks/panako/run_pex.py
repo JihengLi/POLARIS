@@ -74,7 +74,7 @@ def main() -> int:
         java = resolve_java(None)
         native_library_path = resolve_native_library_path(None)
         annotations, reference_paths, query_paths = load_pex_dataset(dataset)
-        _, segments = build_oracle_segments(annotations)
+        segments = build_oracle_segments(annotations)
         grouped = group_oracle_segments(segments)
         cli = PanakoCLI(
             jar=jar,
@@ -123,14 +123,14 @@ def main() -> int:
                 end_ms = min(len(audio), round(segment.end * 1000))
                 excerpt_path = temporary / f"trial-{len(prepared):06d}.wav"
                 audio[begin_ms:end_ms].export(excerpt_path, format="wav")
-                prepared.append((query_id, segment, excerpt_path, (end_ms - begin_ms) / 1000))
+                prepared.append((query_id, segment, excerpt_path))
 
         for batch_start in range(0, len(prepared), 32):
             batch = prepared[batch_start : batch_start + 32]
             try:
                 batch_results = query_many_files(
                     cli,
-                    [(segment.trial_id, path) for _, segment, path, _ in batch],
+                    [(segment.trial_id, path) for _, segment, path in batch],
                     window_seconds=25.0,
                     hop_seconds=20.0,
                     query_configuration=CLOSED_SET_CONFIGURATION,
@@ -139,8 +139,8 @@ def main() -> int:
                 first_trial = batch[0][1].trial_id
                 raise SystemExit(f"Panako query batch failed from {first_trial}: {exc}") from exc
 
-            for query_id, segment, _, _ in batch:
-                ranked, _, elapsed, _ = batch_results[segment.trial_id]
+            for query_id, segment, _ in batch:
+                ranked, elapsed = batch_results[segment.trial_id]
                 predicted_id = ranked[0][0] if ranked else ""
                 rows.append(
                     {
@@ -150,7 +150,6 @@ def main() -> int:
                         "query_begin": segment.begin,
                         "status": "matched" if ranked else "no_match",
                         "predicted_reference_id": predicted_id,
-                        "query_records": None,
                         "total_time": elapsed,
                         "error": "",
                     }
@@ -188,6 +187,13 @@ def main() -> int:
             "workers": 1,
             "query_batch_size": 32,
             "query_batching": "multiple trials per official single-worker JVM",
+            "candidate_order": [
+                "native score",
+                "native seconds_with_match",
+                "native reference span",
+                "reference ID",
+            ],
+            "non_finite_candidate_metrics": "rank below finite values",
             "java_max_heap": cli.java_max_heap or "JVM ergonomic default",
             "window_seconds": 25.0,
             "hop_seconds": 20.0,

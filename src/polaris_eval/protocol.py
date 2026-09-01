@@ -26,9 +26,9 @@ class OracleSegment:
 
 def build_oracle_segments(
     annotations: list[PexAnnotation],
-) -> tuple[list[PexAnnotation], list[OracleSegment]]:
+) -> list[OracleSegment]:
     selected = [annotation for annotation in annotations if annotation.exact_scale]
-    segments = [
+    return [
         OracleSegment(
             annotation,
             float(annotation.query_begin),
@@ -36,7 +36,6 @@ def build_oracle_segments(
         )
         for annotation in selected
     ]
-    return selected, segments
 
 
 def group_oracle_segments(segments: list[OracleSegment]) -> dict[str, list[OracleSegment]]:

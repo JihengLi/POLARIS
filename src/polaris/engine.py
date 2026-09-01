@@ -56,7 +56,7 @@ class VoteAccumulator:
         new = set(fingerprints) - self.seen
         self.seen.update(new)
         query_offsets: dict[str | int, list[int]] = defaultdict(list)
-        for fingerprint_hash, offset in new:
+        for fingerprint_hash, offset in sorted(new):
             query_offsets[fingerprint_hash].append(offset)
         for batch in self.recognizer.index.iter_posting_batches(
             query_offsets,
@@ -119,7 +119,7 @@ class Polaris:
         topn: int,
     ) -> list[dict[str, object]]:
         matcher = self.config.matcher
-        ranked: list[tuple[int, int, int, float]] = []
+        ranked: list[tuple[str, int, int, int, float]] = []
         for track_id, track_votes in votes.items():
             candidates: list[tuple[int, int, float]] = []
             for offset, (raw_count, weighted_score) in track_votes.items():
@@ -137,15 +137,15 @@ class Polaris:
                 candidates,
                 key=lambda value: (value[2], value[1], -value[0]),
             )
-            ranked.append((track_id, offset, count, score))
+            track_name = self.index.get_song_name(track_id)
+            ranked.append((track_name, track_id, offset, count, score))
 
-        ranked.sort(key=lambda value: (value[3], value[2]), reverse=True)
+        ranked.sort(key=lambda value: (-value[4], -value[3], value[0]))
         results = []
-        for track_id, offset, count, score in ranked[:topn]:
-            track = self.index.get_song_by_id(track_id)
+        for track_name, _, offset, count, score in ranked[:topn]:
             results.append(
                 {
-                    "song_name": track["song_name"],
+                    "song_name": track_name,
                     "hashes_matched_in_input": count,
                     "ranking_score": round(score, 5),
                     "offset_seconds": round(
@@ -226,11 +226,14 @@ def build_reference_index(
     if workers <= 0:
         raise ValueError("workers must be positive")
     index = FileIndex(index_directory, writable=True)
-    missing = [
-        Path(path).expanduser().resolve()
-        for path in files
-        if not index.is_song_fingerprinted(Path(path).stem)
-    ]
+    missing = sorted(
+        (
+            Path(path).expanduser().resolve()
+            for path in files
+            if not index.is_song_fingerprinted(Path(path).stem)
+        ),
+        key=lambda path: (path.stem, str(path)),
+    )
     inputs = [(str(path), config) for path in missing]
     inserted = 0
     iterator: Iterable[tuple[str, set[Fingerprint]]]
@@ -242,7 +245,7 @@ def build_reference_index(
             inserted += 1
     else:
         with multiprocessing.Pool(workers) as pool:
-            for track_name, hashes in pool.imap_unordered(_fingerprint_worker, inputs):
+            for track_name, hashes in pool.imap(_fingerprint_worker, inputs):
                 track_id = index.insert_song(track_name, len(hashes))
                 index.insert_hashes(track_id, hashes)
                 inserted += 1

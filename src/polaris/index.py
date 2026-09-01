@@ -45,8 +45,8 @@ class FileIndex:
         self.songs_path = self.directory / "songs.csv"
         self.pending_fingerprints_path = self.directory / "fingerprints.csv"
         self.inverted_path = self.directory / "fingerprints_inverted.csv"
-        self.songs: dict[str, tuple[int, int]] = {}
-        self.songs_by_id: dict[int, tuple[str, int]] = {}
+        self.songs: dict[str, int] = {}
+        self.songs_by_id: dict[int, str] = {}
         self.max_song_id = 0
         self._load_songs()
         self.inverted_positions = self._load_inverted_positions()
@@ -62,11 +62,10 @@ class FileIndex:
         with self.songs_path.open(encoding="utf-8") as songs_file:
             for line in songs_file:
                 song_id_text, remainder = line.rstrip("\n").split(",", maxsplit=1)
-                song_name, total_hashes_text = remainder.rsplit(",", maxsplit=1)
+                song_name, _ = remainder.rsplit(",", maxsplit=1)
                 song_id = int(song_id_text)
-                total_hashes = int(total_hashes_text)
-                self.songs[song_name] = (song_id, total_hashes)
-                self.songs_by_id[song_id] = (song_name, total_hashes)
+                self.songs[song_name] = song_id
+                self.songs_by_id[song_id] = song_name
                 self.max_song_id = max(self.max_song_id, song_id)
 
     def _load_inverted_positions(self) -> dict[str, int]:
@@ -97,9 +96,8 @@ class FileIndex:
     def is_song_fingerprinted(self, song_name: str) -> bool:
         return song_name in self.songs
 
-    def get_song_by_id(self, song_id: int) -> dict[str, object]:
-        song_name, total_hashes = self.songs_by_id[song_id]
-        return {"song_name": song_name, "total_hashes": total_hashes}
+    def get_song_name(self, song_id: int) -> str:
+        return self.songs_by_id[song_id]
 
     def insert_song(self, song_name: str, total_hashes: int) -> int:
         if self.songs_file is None:
@@ -108,8 +106,8 @@ class FileIndex:
         song_id = self.max_song_id
         self.songs_file.write(f"{song_id},{song_name},{total_hashes}\n")
         self.songs_file.flush()
-        self.songs[song_name] = (song_id, total_hashes)
-        self.songs_by_id[song_id] = (song_name, total_hashes)
+        self.songs[song_name] = song_id
+        self.songs_by_id[song_id] = song_name
         return song_id
 
     def insert_hashes(
@@ -119,7 +117,7 @@ class FileIndex:
     ) -> None:
         if self.fingerprints_file is None:
             raise RuntimeError("index was opened read-only")
-        for fingerprint_hash, offset in hashes:
+        for fingerprint_hash, offset in sorted(hashes):
             self.fingerprints_file.write(f"{fingerprint_hash},1,{song_id}:{offset}\n")
         self.fingerprints_file.flush()
 
@@ -191,8 +189,8 @@ class PackedIndex:
         if not has_packed_index(self.directory):
             raise FileNotFoundError(f"packed POLARIS index is incomplete: {self.directory}")
         self.songs_path = self.directory / "songs.csv"
-        self.songs: dict[str, tuple[int, int]] = {}
-        self.songs_by_id: dict[int, tuple[str, int]] = {}
+        self.songs: dict[str, int] = {}
+        self.songs_by_id: dict[int, str] = {}
         self._load_songs()
         self.keys = np.load(
             self.directory / PACKED_INDEX_FILES["keys"],
@@ -219,19 +217,17 @@ class PackedIndex:
         with self.songs_path.open(encoding="utf-8") as songs_file:
             for line in songs_file:
                 song_id_text, remainder = line.rstrip("\n").split(",", maxsplit=1)
-                song_name, total_hashes_text = remainder.rsplit(",", maxsplit=1)
+                song_name, _ = remainder.rsplit(",", maxsplit=1)
                 song_id = int(song_id_text)
-                total_hashes = int(total_hashes_text)
-                self.songs[song_name] = (song_id, total_hashes)
-                self.songs_by_id[song_id] = (song_name, total_hashes)
+                self.songs[song_name] = song_id
+                self.songs_by_id[song_id] = song_name
 
     def close(self) -> None:
         # NumPy memmaps close with their owning arrays; no writable handle exists.
         return None
 
-    def get_song_by_id(self, song_id: int) -> dict[str, object]:
-        song_name, total_hashes = self.songs_by_id[song_id]
-        return {"song_name": song_name, "total_hashes": total_hashes}
+    def get_song_name(self, song_id: int) -> str:
+        return self.songs_by_id[song_id]
 
     def iter_posting_batches(
         self,
@@ -276,7 +272,7 @@ class PackedIndex:
 def build_packed_index(
     source_directory: str | Path,
     destination_directory: str | Path | None = None,
-) -> dict[str, int]:
+) -> None:
     """Convert an existing grouped CSV index to sorted mmap arrays.
 
     No audio is decoded and no fingerprints are regenerated.  Existing packed
@@ -440,7 +436,6 @@ def build_packed_index(
                 shutil.copy2(baseline_path, destination / "baseline.json")
         for filename in PACKED_INDEX_FILES.values():
             os.replace(temporary / filename, destination / filename)
-    return {"hash_rows": row_count, "postings": posting_count}
 
 
 def _hash_key(line: str) -> str:
@@ -508,7 +503,7 @@ def _group_postings(sorted_path: Path, grouped_path: Path) -> None:
 
 
 def merge_file_index(index_directory: str | Path, *, chunk_size: int = 1_000_000) -> None:
-    """Atomically merge pending rows, omitting the old unused count sort."""
+    """Atomically merge pending fingerprint rows into the grouped index."""
 
     directory = Path(index_directory).expanduser().resolve()
     raw_path = directory / "fingerprints.csv"

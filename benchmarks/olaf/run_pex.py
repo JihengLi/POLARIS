@@ -32,7 +32,6 @@ from common import (  # noqa: E402
     OlafAdapterError,
     OlafCLI,
     build_reference_index,
-    candidate_at_rank,
     ffmpeg_version,
     numeric_reference_map,
     validate_index,
@@ -61,7 +60,7 @@ def evaluate(prepared, cli: OlafCLI, reference_ids: dict[int, str]) -> dict[str,
     query_id, segment, path = prepared
     result = cli.query(path, reference_ids)
     matches = result.matches
-    predicted = candidate_at_rank(matches, 1)
+    predicted = matches[0] if matches else None
     return {
         "trial_id": segment.trial_id,
         "query_id": query_id,
@@ -69,7 +68,6 @@ def evaluate(prepared, cli: OlafCLI, reference_ids: dict[int, str]) -> dict[str,
         "query_begin": segment.begin,
         "status": "matched" if matches else "no_match",
         "predicted_reference_id": predicted.reference_id if predicted else "",
-        "query_records": result.query_records,
         "total_time": result.wall_seconds,
         "error": "",
     }
@@ -84,7 +82,7 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     try:
         annotations, references, query_paths = load_pex(dataset)
-        _, segments = build_oracle_segments(annotations)
+        segments = build_oracle_segments(annotations)
         grouped = group_oracle_segments(segments)
         reference_ids = numeric_reference_map(references)
         cli = OlafCLI(args.binary, args.index)
@@ -130,7 +128,7 @@ def main() -> int:
     write_csv(rows, results_path, FIELDS)
     summary = {
         "schema": "polaris-paper-results-v1",
-        "protocol": "pex_hard_medium_exact_scale_oracle_segments",
+        "protocol": "pex_oracle_segment_exact_scale_v1",
         "system": "olaf",
         "system_version": OLAF_VERSION,
         "dataset": str(dataset),

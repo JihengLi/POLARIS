@@ -46,6 +46,10 @@ BASELINES = (
 )
 POLARIS = (("polaris_o", "hash"), ("polaris_a", "hash"), ("polaris_f", "hash"))
 CONTROLS = (("magnitude_maxima", "hash"), ("target_region", "hash"))
+PROTOCOLS = {
+    "pex": "pex_oracle_segment_exact_scale_v1",
+    "sdrr": "sdrr_closed_set_retrieval_and_offset_v1",
+}
 SOURCES = tuple(
     ResultSource(dataset, system, family)
     for dataset in ("pex", "sdrr")
@@ -80,7 +84,7 @@ def read_rows(path: Path) -> list[dict[str, str]]:
 
 
 def _uses_query_stage(system: str) -> bool:
-    return system.startswith("polaris_") or system in {name for name, _ in CONTROLS}
+    return system.startswith("polaris_")
 
 
 def _top1(summary: Mapping[str, object]) -> float:
@@ -99,27 +103,25 @@ def _index(summary: Mapping[str, object], family: str) -> tuple[int, int]:
         return int(index["reference_embeddings"]), 520
     if family == "panako":
         return int(index["stored_fingerprints"]), 20
-    if family == "hash" and "reference_hash_postings" in index:
-        return int(index["reference_hash_postings"]), 16
-    if family == "hash" and summary["system"] == "audfprint":
-        return int(index["stored_postings"]), 16
-    if family == "hash" and summary["system"] == "olaf":
-        return int(index["stored_fingerprints"]), 16
+    if family == "hash":
+        for field in ("reference_hash_postings", "stored_postings", "stored_fingerprints"):
+            if field in index:
+                return int(index[field]), 16
     raise ValueError("unknown current index schema")
 
 
-def _mean_query_evidence(
+def _mean_query_payload(
     rows: Sequence[Mapping[str, str]],
     family: str,
-) -> tuple[float | None, float | None]:
+) -> float | None:
     if family == "panako":
-        return None, None
+        return None
     values = [float(row["query_records"]) for row in rows if row.get("query_records") not in (None, "")]
     if not values:
-        return None, None
+        return None
     count = statistics.fmean(values)
     bytes_per_record = 516 if family == "nmfp" else 12
-    return count, count * bytes_per_record / (1024**2)
+    return count * bytes_per_record / (1024**2)
 
 
 def _mean_runtime(rows: Sequence[Mapping[str, str]]) -> float | None:
@@ -240,9 +242,15 @@ def main() -> int:
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         if summary.get("schema") != "polaris-paper-results-v1":
             raise ValueError(f"unsupported result schema: {summary_path}")
+        if summary.get("system") != source.system:
+            raise ValueError(f"unexpected system ID in {summary_path}")
+        if summary.get("protocol") != PROTOCOLS[source.dataset]:
+            raise ValueError(f"unexpected protocol ID in {summary_path}")
         rows = read_rows(rows_path)
         base_fields = SDRR_RESULT_FIELDS if source.dataset == "sdrr" else PEX_RESULT_FIELDS
         expected_fields = set(base_fields)
+        if source.family == "panako":
+            expected_fields.discard("query_records")
         if _uses_query_stage(source.system):
             expected_fields.add("query_stage")
         if not rows or set(rows[0]) != expected_fields:
@@ -260,7 +268,7 @@ def main() -> int:
                 / (1024**2)
                 / (sdrr_reference_seconds / 3600)
             )
-            _, query_payload = _mean_query_evidence(rows, source.family)
+            query_payload = _mean_query_payload(rows, source.family)
             query_time = _mean_runtime(rows)
         else:
             reference_payload = None

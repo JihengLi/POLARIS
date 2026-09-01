@@ -328,7 +328,7 @@ class DelaunayGeometry:
         multiprobe_radius: int,
         packed: bool,
     ) -> set[FingerprintLike]:
-        """Hash additional triples reachable in the query Delaunay graph."""
+        """Hash capped additional triples; canonical Delaunay faces are excluded."""
 
         if not self.faces:
             return set()

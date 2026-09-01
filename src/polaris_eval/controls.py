@@ -213,7 +213,7 @@ def control_fingerprints(
         geometry = DelaunayGeometry(landmarks, config.delaunay)
         result.update(
             geometry.face_hashes(
-                multiprobe_radius=0,
+                multiprobe_radius=(config.query.multiprobe_radius if query else 0),
                 packed=packed,
             )
         )
@@ -255,7 +255,10 @@ def build_control_index(
     workers: int,
 ) -> int:
     index = FileIndex(directory, writable=True)
-    missing = [path.resolve() for path in files if not index.is_song_fingerprinted(path.stem)]
+    missing = sorted(
+        (path.resolve() for path in files if not index.is_song_fingerprinted(path.stem)),
+        key=lambda path: (path.stem, str(path)),
+    )
     inputs = [(str(path), system) for path in missing]
     inserted = 0
     if workers == 1:
@@ -266,7 +269,7 @@ def build_control_index(
             inserted += 1
     else:
         with multiprocessing.Pool(workers) as pool:
-            for track_name, hashes in pool.imap_unordered(_index_worker, inputs):
+            for track_name, hashes in pool.imap(_index_worker, inputs):
                 track_id = index.insert_song(track_name, len(hashes))
                 index.insert_hashes(track_id, hashes)
                 inserted += 1

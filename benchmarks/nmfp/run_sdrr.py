@@ -33,16 +33,11 @@ DEFAULT_MODEL_DIR = (
 )
 SOURCE_COMMIT = "e95e2b4009751274b060a6b74c26ae1323daae59"
 
-from polaris_eval.io import EvaluationError
+from polaris_eval.datasets import SdrrQuery, load_sdrr, unique_sdrr_references
+from polaris_eval.io import EvaluationError, sha256
 from polaris_eval.io import write_csv as write_csv_rows
 from polaris_eval.io import write_json as write_summary
 from polaris_eval.metrics import SDRR_RESULT_FIELDS, summarize_sdrr
-from polaris_eval.real import (
-    RealQuery,
-    file_sha256,
-    load_real_manifest,
-    unique_references,
-)
 
 RESULT_FIELDS = SDRR_RESULT_FIELDS
 
@@ -53,7 +48,7 @@ FRAME_TOP_K = 10
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate NMFP-Triplet on SD-RR.")
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("dataset", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR)
@@ -65,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _common_result(item: RealQuery) -> dict[str, object]:
+def _common_result(item: SdrrQuery) -> dict[str, object]:
     return {
         "query_id": item.query_id,
         "reference_id": item.reference_id,
@@ -73,7 +68,7 @@ def _common_result(item: RealQuery) -> dict[str, object]:
 
 
 def result_from_ranking(
-    item: RealQuery,
+    item: SdrrQuery,
     ranking: list[tuple[str, float, int]],
     *,
     track_start_by_id: dict[str, int],
@@ -81,7 +76,7 @@ def result_from_ranking(
     query_embeddings: int,
     total_time: float,
 ) -> dict[str, object]:
-    """Convert NMFP's global candidate starts into comparable real-query metrics."""
+    """Convert NMFP's global candidate starts into SD-RR retrieval results."""
 
     predicted = ranking[0] if ranking else None
 
@@ -112,7 +107,7 @@ def result_from_ranking(
     return row
 
 
-def error_result(item: RealQuery, exc: Exception) -> dict[str, object]:
+def error_result(item: SdrrQuery, exc: Exception) -> dict[str, object]:
     return {
         **_common_result(item),
         "status": "error",
@@ -126,7 +121,7 @@ def error_result(item: RealQuery, exc: Exception) -> dict[str, object]:
 
 
 def evaluate_query(
-    item: RealQuery,
+    item: SdrrQuery,
     *,
     decode: Callable[[Path], np.ndarray],
     embed: Callable[[np.ndarray], np.ndarray],
@@ -137,13 +132,13 @@ def evaluate_query(
     track_start_by_id: dict[str, int],
     hop_seconds: float,
     frame_top_k: int,
-    ranker: Callable[..., tuple[list[tuple[str, float, int]], int]],
+    ranker: Callable[..., list[tuple[str, float, int]]],
 ) -> dict[str, object]:
     trial_started = time.perf_counter()
     try:
         query_audio = decode(item.query_path)
         query_embedding = embed(query_audio)
-        ranking, _candidate_count = ranker(
+        ranking = ranker(
             query_embedding,
             database,
             track_starts,
@@ -171,7 +166,8 @@ def main() -> None:
     from common import file_md5, infer_embeddings, load_model, source_commit
     from run_pex import atomic_save_array, load_cached_array, rank_query
 
-    manifest = args.manifest.expanduser().resolve()
+    dataset = args.dataset.expanduser().resolve()
+    manifest = dataset / "manifest.csv"
     output = args.output.expanduser().resolve()
     source_dir = args.source_dir.expanduser().resolve()
     model_dir = args.model_dir.expanduser().resolve()
@@ -182,8 +178,8 @@ def main() -> None:
         else output / "embedding_cache" / "references"
     )
     try:
-        all_items = load_real_manifest(manifest)
-        references = unique_references(all_items)
+        all_items = load_sdrr(dataset)
+        references = unique_sdrr_references(all_items)
         items = list(all_items)
     except (EvaluationError, OSError, json.JSONDecodeError) as exc:
         raise SystemExit(str(exc)) from exc
@@ -267,10 +263,10 @@ def main() -> None:
     checkpoint_data = model_dir / "ckpt-100.data-00000-of-00001"
     summary = {
         "schema": "polaris-paper-results-v1",
-        "protocol": "real_phone_closed_set_retrieval_and_offset_localization",
-        "system": "nmfp-triplet",
+        "protocol": "sdrr_closed_set_retrieval_and_offset_v1",
+        "system": "nmfp",
         "manifest": str(manifest),
-        "manifest_sha256": file_sha256(manifest),
+        "manifest_sha256": sha256(manifest),
         "source": {
             "repository": "https://github.com/raraz15/neural-music-fp",
             "directory": str(source_dir),
@@ -295,7 +291,7 @@ def main() -> None:
         },
         "offset_definition": (
             "best NMFP reference sequence start embedding multiplied by hop_seconds; "
-            "ground truth is reference_begin_seconds from the real-query manifest"
+            "ground truth is reference_begin_seconds from the SD-RR manifest"
         ),
         **summarize_sdrr(rows),
         "index": {
@@ -304,14 +300,13 @@ def main() -> None:
         },
         "model": {
             "parameters": int(model.count_params()),
-            "fingerprints_per_second": 1.0 / HOP_SECONDS,
         },
         "files": {
             "query_results_csv": str(results_path),
             "reference_embedding_cache": str(reference_cache),
         },
         "limitations": [
-            "Closed-set evaluation over the references named by the real manifest.",
+            "Closed-set evaluation over the references named by the SD-RR manifest.",
             "Exact flat frame search replaces approximate FAISS pruning.",
             "Offset resolution is limited by the configured embedding hop.",
         ],

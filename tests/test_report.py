@@ -13,7 +13,7 @@ from pathlib import Path
 from polaris_eval.metrics import summarize_pex, summarize_sdrr
 from polaris_eval.report import (
     _correct,
-    _mean_query_evidence,
+    _mean_query_payload,
     _protocol_reference_seconds,
     _trial_key,
 )
@@ -31,8 +31,7 @@ def test_pex_rows_have_a_common_pairing_key() -> None:
 
 
 def test_hash_query_records_are_counted() -> None:
-    count, payload = _mean_query_evidence([{"query_records": "1190"}], "hash")
-    assert count == 1190
+    payload = _mean_query_payload([{"query_records": "1190"}], "hash")
     assert payload == 1190 * 12 / (1024**2)
 
 

@@ -16,7 +16,6 @@ PEX_RESULT_FIELDS = (
     "query_begin",
     "status",
     "predicted_reference_id",
-    "query_records",
     "total_time",
     "error",
 )

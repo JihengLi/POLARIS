@@ -84,3 +84,28 @@ def test_end_to_end_file_and_packed_index_agree(tmp_path: Path):
     assert {
         mode: result["results"] for mode, result in packed_results.items()
     } == {mode: result["results"] for mode, result in file_results.items()}
+
+
+def test_parallel_index_and_tied_ranking_are_deterministic(tmp_path: Path):
+    sample_rate = DEFAULT_CONFIG.audio.sample_rate
+    first = tmp_path / "reference-a.wav"
+    second = tmp_path / "reference-b.wav"
+    samples = _signal()
+    wavfile.write(first, sample_rate, samples)
+    wavfile.write(second, sample_rate, samples)
+
+    index = tmp_path / "index"
+    assert build_reference_index([second, first], index, workers=2) == 2
+    song_names = [
+        line.split(",", maxsplit=2)[1]
+        for line in (index / "songs.csv").read_text(encoding="utf-8").splitlines()
+    ]
+    assert song_names == ["reference-a", "reference-b"]
+
+    build_packed_index(index)
+    with Polaris(index, index_backend="packed") as recognizer:
+        result = recognizer.recognize_file(first, mode="o", topn=2)
+    assert [match["song_name"] for match in result["results"]] == [
+        "reference-a",
+        "reference-b",
+    ]

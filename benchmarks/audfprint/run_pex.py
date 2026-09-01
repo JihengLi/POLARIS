@@ -17,11 +17,11 @@ import random
 import subprocess
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from pydub import AudioSegment
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = REPOSITORY_ROOT / "src"
@@ -30,13 +30,12 @@ if str(SRC_ROOT) not in sys.path:
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from polaris_eval import audio
-from polaris_eval.datasets import PexAnnotation
 from polaris_eval.datasets import load_pex as load_pex_dataset
 from polaris_eval.io import EvaluationError
 from polaris_eval.io import write_csv as write_csv_rows
 from polaris_eval.io import write_json as write_summary
 from polaris_eval.metrics import PEX_RESULT_FIELDS, summarize_pex
+from polaris_eval.protocol import OracleSegment, build_oracle_segments, group_oracle_segments
 
 ADAPTER_DIRECTORY = Path(__file__).resolve().parent
 DEFAULT_SOURCE_DIRECTORY = ADAPTER_DIRECTORY / ".cache" / "audfprint"
@@ -57,8 +56,8 @@ PROFILES = {
         "search_depth": 100,
     },
     "audfp_q": {
-        "query_density": 1440.0,
-        "query_fanout": 86,
+        "query_density": 504.0,
+        "query_fanout": 30,
         "query_max_peaks_per_frame": 11,
         "search_depth": 2000,
     },
@@ -157,6 +156,12 @@ def samples_to_hashes(analyzer: Any, analyze_module: Any, samples: np.ndarray) -
     return np.column_stack((unique >> 32, unique & ((1 << 32) - 1))).astype(np.int32)
 
 
+def read_mono_audio(path: Path, sample_rate: int) -> np.ndarray:
+    audio = AudioSegment.from_file(str(path))
+    audio = audio.set_sample_width(2).set_frame_rate(sample_rate).set_channels(1)
+    return np.frombuffer(audio.raw_data, dtype=np.int16)
+
+
 def configure_matcher(module: Any, args: argparse.Namespace) -> Any:
     matcher = module.Matcher()
     matcher.window = args.match_window
@@ -175,19 +180,19 @@ def evaluate_query_group(
     task: tuple[
         str,
         Path,
-        list[tuple[PexAnnotation, float, float, str]],
+        list[OracleSegment],
     ],
     sample_rate: int,
 ) -> list[dict[str, object]]:
     """Evaluate all oracle segments belonging to one PEX query file."""
 
     query_id, query_path, query_segments = task
-    channels, actual_sample_rate = audio.read(str(query_path), fs=sample_rate)
-    samples = channels[0]
+    samples = read_mono_audio(query_path, sample_rate)
     rows: list[dict[str, object]] = []
-    for annotation, begin, end, trial_id in query_segments:
-        start_sample = max(0, round(begin * actual_sample_rate))
-        end_sample = min(len(samples), round(end * actual_sample_rate))
+    for segment in query_segments:
+        annotation = segment.annotation
+        start_sample = max(0, round(segment.begin * sample_rate))
+        end_sample = min(len(samples), round(segment.end * sample_rate))
         excerpt = samples[start_sample:end_sample]
         feature_started = time.perf_counter()
         query_hashes = samples_to_hashes(analyzer, analyze_module, excerpt)
@@ -199,13 +204,12 @@ def evaluate_query_group(
         predicted_id = Path(ranking[0][0]).stem if ranking else ""
         rows.append(
             {
-                "trial_id": trial_id,
+                "trial_id": segment.trial_id,
                 "query_id": query_id,
                 "reference_id": annotation.reference_id,
-                "query_begin": begin,
+                "query_begin": segment.begin,
                 "status": "matched" if ranking else "no_match",
                 "predicted_reference_id": predicted_id,
-                "query_records": len(query_hashes),
                 "total_time": feature_seconds + lookup_seconds,
                 "error": "",
             }
@@ -232,7 +236,7 @@ def initialize_query_worker(
 
 
 def evaluate_query_worker(
-    task: tuple[str, Path, list[tuple[PexAnnotation, float, float, str]]],
+    task: tuple[str, Path, list[OracleSegment]],
 ) -> list[dict[str, object]]:
     if any(
         value is None
@@ -253,26 +257,6 @@ def evaluate_query_worker(
         task,
         _WORKER_SAMPLE_RATE,
     )
-
-
-def exact_annotations(annotations: list[PexAnnotation]) -> list[PexAnnotation]:
-    return [annotation for annotation in annotations if annotation.exact_scale]
-
-
-def trial_segments(
-    annotations: list[PexAnnotation],
-) -> list[tuple[PexAnnotation, float, float, str]]:
-    return [
-        (
-            annotation,
-            float(annotation.query_begin),
-            float(annotation.query_end),
-            annotation.annotation_id,
-        )
-        for annotation in annotations
-    ]
-
-
 def build_or_load_index(
     args: argparse.Namespace,
     reference_paths: dict[str, Path],
@@ -360,8 +344,7 @@ def main() -> int:
     source_directory = args.source_dir.expanduser().resolve()
     analyze_module, match_module, table_module = load_audfprint(source_directory)
     annotations, reference_paths, query_paths = load_pex_dataset(dataset)
-    source_annotations = exact_annotations(annotations)
-    segments = trial_segments(source_annotations)
+    segments = build_oracle_segments(annotations)
     table, index_path, build_metadata = build_or_load_index(
         args,
         reference_paths,
@@ -370,9 +353,7 @@ def main() -> int:
         output,
     )
 
-    grouped: dict[str, list[tuple[PexAnnotation, float, float, str]]] = defaultdict(list)
-    for segment in segments:
-        grouped[segment[0].query_id].append(segment)
+    grouped = group_oracle_segments(segments)
     tasks = [(query_id, query_paths[query_id], grouped[query_id]) for query_id in sorted(grouped)]
     rows: list[dict[str, object]] = []
     completed = 0
@@ -419,7 +400,7 @@ def main() -> int:
     summary = {
         "schema": "polaris-paper-results-v1",
         "protocol": "pex_oracle_segment_exact_scale_v1",
-        "system": "audfprint",
+        "system": args.profile,
         "dataset": str(dataset),
         "source": {
             "repository": "https://github.com/dpwe/audfprint",
@@ -429,8 +410,6 @@ def main() -> int:
         },
         "configuration": {
             "profile": args.profile,
-            "density": args.density,
-            "fanout": args.fanout,
             "reference_density": args.density,
             "reference_fanout": args.fanout,
             "query_density": (

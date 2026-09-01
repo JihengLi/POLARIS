@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import hashlib
+import math
 import os
 import platform
 import re
@@ -29,18 +30,31 @@ PANAKO_VERSION = "2.1"
 DEFAULT_JAR = Path(__file__).parent / ".cache" / "Panako" / "build" / "libs" / "panako-2.1-all.jar"
 
 
+def _finite_or_negative_infinity(value: float) -> float:
+    """Map non-finite native metrics to a deterministic lowest rank."""
+
+    return value if math.isfinite(value) else -math.inf
+
+
+def _match_rank_key(reference_id: str, match: PanakoWindowMatch) -> tuple[float, float, float, str]:
+    """Return a total ordering for Panako candidates, including weak-score ties."""
+
+    return (
+        _finite_or_negative_infinity(match.score),
+        _finite_or_negative_infinity(match.seconds_with_match),
+        _finite_or_negative_infinity(match.reference_stop - match.reference_start),
+        reference_id,
+    )
+
+
 @dataclass(frozen=True)
 class PanakoWindowMatch:
     query_path: Path
     query_start: float
-    query_stop: float
     reference_path: Path
-    reference_identifier: str
     reference_start: float
     reference_stop: float
     score: float
-    time_factor: float
-    frequency_factor: float
     seconds_with_match: float
 
 
@@ -67,14 +81,10 @@ def parse_query_output(output: str) -> list[PanakoWindowMatch]:
                 PanakoWindowMatch(
                     query_path=Path(fields[2]).resolve(),
                     query_start=float(fields[3]),
-                    query_stop=float(fields[4]),
                     reference_path=Path(fields[5]).resolve(),
-                    reference_identifier=fields[6],
                     reference_start=float(fields[7]),
                     reference_stop=float(fields[8]),
                     score=float(fields[9]),
-                    time_factor=float(fields[10].removesuffix("%").strip()),
-                    frequency_factor=float(fields[11].removesuffix("%").strip()),
                     seconds_with_match=float(fields[12]),
                 )
             )
@@ -309,7 +319,7 @@ def query_one_file(
     window_seconds: float,
     hop_seconds: float,
     query_configuration: tuple[str, ...] = (),
-) -> tuple[list[tuple[str, PanakoWindowMatch, float]], list[dict[str, object]], float, int]:
+) -> tuple[list[tuple[str, PanakoWindowMatch, float]], float]:
     return query_many_files(
         cli,
         [(query_id, query_path)],
@@ -326,9 +336,7 @@ def query_many_files(
     window_seconds: float,
     hop_seconds: float,
     query_configuration: tuple[str, ...] = (),
-) -> dict[
-    str, tuple[list[tuple[str, PanakoWindowMatch, float]], list[dict[str, object]], float, int]
-]:
+) -> dict[str, tuple[list[tuple[str, PanakoWindowMatch, float]], float]]:
     if not queries:
         return {}
     if len(queries) != len({query_id for query_id, _ in queries}):
@@ -339,7 +347,6 @@ def query_many_files(
     best: dict[str, dict[str, tuple[PanakoWindowMatch, float]]] = {
         query_id: {} for query_id, _ in queries
     }
-    window_counts: dict[str, int] = {}
     with tempfile.TemporaryDirectory(prefix="panako-query-") as directory:
         root = Path(directory)
         metadata: dict[Path, tuple[str, float]] = {}
@@ -352,7 +359,6 @@ def query_many_files(
                 .set_sample_width(2)
             )
             starts = window_starts(len(audio), window_ms, hop_ms)
-            window_counts[query_id] = len(starts)
             query_directory = root / f"q{number:04d}"
             query_directory.mkdir()
             for start_ms in starts:
@@ -367,20 +373,8 @@ def query_many_files(
             query_id, start = metadata[match.query_path]
             reference_id = match.reference_path.stem
             previous = best[query_id].get(reference_id)
-            key = (
-                match.score,
-                match.seconds_with_match,
-                match.reference_stop - match.reference_start,
-            )
-            previous_key = (
-                (
-                    previous[0].score,
-                    previous[0].seconds_with_match,
-                    previous[0].reference_stop - previous[0].reference_start,
-                )
-                if previous
-                else None
-            )
+            key = _match_rank_key(reference_id, match)
+            previous_key = _match_rank_key(reference_id, previous[0]) if previous else None
             if previous_key is None or key > previous_key:
                 best[query_id][reference_id] = (match, start)
     per_query = (perf_counter() - started) / len(queries)
@@ -391,10 +385,10 @@ def query_many_files(
                 (reference_id, match, start)
                 for reference_id, (match, start) in best[query_id].items()
             ),
-            key=lambda item: (item[1].score, item[1].seconds_with_match, item[0]),
+            key=lambda item: _match_rank_key(item[0], item[1]),
             reverse=True,
         )
-        results[query_id] = (ranked, [], per_query, window_counts[query_id])
+        results[query_id] = (ranked, per_query)
     return results
 
 

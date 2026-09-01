@@ -65,6 +65,7 @@ class DelaunayConfig:
 class QueryConfig:
     neighborhood_hops: int = 2
     max_neighbors_per_anchor: int = 12
+    # This cap applies only to additional two-hop triples; Delaunay faces are retained.
     max_triangles_per_anchor: int = 24
     multiprobe_radius: int = 1
 

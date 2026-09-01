@@ -12,11 +12,13 @@ directories:
 | NMFP-Triplet | `raraz15/neural-music-fp` | `e95e2b4009751274b060a6b74c26ae1323daae59`; official Zenodo checkpoint |
 
 Audfp-M uses density/fanout 28/4. Audfp-Q keeps that same reference index and
-changes only query construction (density 1440, fanout 86, per-frame peak cap
+changes only query construction (density 504, fanout 30, per-frame peak cap
 11, search depth 2000). OLAF's main-table row is explicitly the
 `paper` profile with storage-matched parameters and closed-set
 `min_match_count=1`; it is not an upstream-default row. Panako uses its official fingerprinting and
-reject-disabled closed-set thresholds. NMFP uses the official pretrained
+reject-disabled closed-set thresholds. Tied Panako candidates are ordered
+deterministically by native score, matched seconds, reference span, and finally
+reference ID; non-finite native metrics rank below finite values. NMFP uses the official pretrained
 Triplet checkpoint and exhaustive candidate scoring.
 
 Each adapter records the upstream commit, configuration, result rows, and
