@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use POLARIS, cite the associated paper and the SD-RR dataset."
+message: "If you use POLARIS, please cite the paper below. If you use SD-RR, also cite the dataset release."
 title: "POLARIS: Training-Free Audio Fingerprinting with Saliency-Based Landmarks and Delaunay Grouping"
 type: software
 authors:
@@ -15,3 +15,16 @@ keywords:
   - Delaunay triangulation
   - spectral landmarks
   - asymmetric retrieval
+preferred-citation:
+  type: article
+  title: "POLARIS: Training-Free Audio Fingerprinting with Saliency-Based Landmarks and Delaunay Grouping"
+  authors:
+    - family-names: Li
+      given-names: Jiheng
+      affiliation: Vanderbilt University
+      orcid: "https://orcid.org/0009-0001-0638-1997"
+  journal: "arXiv preprint arXiv:2609.14820"
+  year: 2026
+  date-published: "2026-09-13"
+  doi: "10.48550/arXiv.2609.14820"
+  url: "https://arxiv.org/abs/2609.14820"

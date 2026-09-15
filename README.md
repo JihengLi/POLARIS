@@ -5,6 +5,8 @@ Fingerprinting with Saliency-Based Landmarks and Delaunay Grouping**. It
 contains the final method, the two controlled variants used in the ablation
 table, and adapters for every baseline in the paper.
 
+**Paper:** [arXiv:2609.14820](https://arxiv.org/abs/2609.14820) | [Citation](#citation)
+
 POLARIS selects local maxima of a locally normalized saliency field, stores
 Delaunay-face triplets for each reference, and optionally adds triples from
 two-hop Delaunay neighborhoods at query time.
@@ -134,6 +136,27 @@ predeclared clustered paired comparisons used by the paper.
 Failures and no-candidate outputs count as incorrect. SD-RR uncertainty and
 comparisons cluster its three queries by reference track; PEX clusters by
 montage query file. Logical payload excludes database serialization overhead.
+
+## Citation
+
+If you use POLARIS, please cite the paper:
+
+```bibtex
+@article{li2026polaris,
+  title = {{POLARIS}: Training-Free Audio Fingerprinting with Saliency-Based Landmarks and {Delaunay} Grouping},
+  author = {Li, Jiheng},
+  journal = {arXiv preprint arXiv:2609.14820},
+  year = {2026},
+  eprint = {2609.14820},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.SD},
+  doi = {10.48550/arXiv.2609.14820},
+  url = {https://arxiv.org/abs/2609.14820}
+}
+```
+
+If you use SD-RR, also cite the
+[dataset release](https://doi.org/10.5281/zenodo.22169646).
 
 ## Licenses
 
